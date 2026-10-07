@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{5C2E9B41-7D3A-4F6E-A1B8-98C0D2E4F601}</ProjectGuid>
+    <RootNamespace>PC98PLAYER</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+    <WholeProgramOptimization Condition="'$(Configuration)'=='Release'">true</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <OutDir>$(SolutionDir)out\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)out\obj\$(Configuration)\</IntDir>
+    <TargetName>PC98PLAYER</TargetName>
+  </PropertyGroup>
+  <!-- ymfm は同梱しない。tools\fetch_ymfm.cmd で third_party\ymfm に取得すると自動で組み込まれる -->
+  <PropertyGroup>
+    <YmfmPresent>false</YmfmPresent>
+    <YmfmPresent Condition="Exists('$(ProjectDir)third_party\ymfm\src\ymfm_opn.cpp')">true</YmfmPresent>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization Condition="'$(Configuration)'=='Release'">MaxSpeed</Optimization>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Release'">MultiThreaded</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebug</RuntimeLibrary>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>winmm.lib;gdi32.lib;user32.lib;shell32.lib;comdlg32.lib;setupapi.lib;advapi32.lib;ole32.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(YmfmPresent)'=='true'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\ymfm\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>GMPV3_WITH_YMFM;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="core\cpu.cpp" />
+    <ClCompile Include="core\machine.cpp" />
+    <ClCompile Include="core\bios.cpp" />
+    <ClCompile Include="core\dos.cpp" />
+    <ClCompile Include="core\egc.cpp" />
+    <ClCompile Include="core\fontrom.cpp" />
+    <ClCompile Include="core\hostfs.cpp" />
+    <ClCompile Include="core\video.cpp" />
+    <ClCompile Include="core\player.cpp" />
+    <ClCompile Include="core\opna_renderer.cpp" />
+    <ClCompile Include="core\rhythm_rom.cpp" />
+    <ClCompile Include="core\xmsems.cpp" />
+    <ClCompile Include="core\pcm86.cpp" />
+    <ClCompile Include="core\lio.cpp" />
+    <ClCompile Include="core\soundbios.cpp" />
+    <ClCompile Include="core\floppy.cpp" />
+    <ClCompile Include="core\fdflux.cpp" />
+    <ClCompile Include="core\fdreal.cpp" />
+    <ClCompile Include="core\hdimage.cpp" />
+    <ClCompile Include="core\fatfs.cpp" />
+    <ClCompile Include="core\gdcdraw.cpp" />
+    <ClCompile Include="win32\main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="win32\pc98player.rc" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(YmfmPresent)'=='true'">
+    <ClCompile Include="third_party\ymfm\src\ymfm_opn.cpp" />
+    <ClCompile Include="third_party\ymfm\src\ymfm_adpcm.cpp" />
+    <ClCompile Include="third_party\ymfm\src\ymfm_ssg.cpp" />
+  </ItemGroup>
+  <Target Name="YmfmNotice" BeforeTargets="ClCompile">
+    <Message Importance="high" Condition="'$(YmfmPresent)'=='true'" Text="PC98PLAYER: ymfm を検出しました。FM 音源を有効にしてビルドします。" />
+    <Message Importance="high" Condition="'$(YmfmPresent)'!='true'" Text="PC98PLAYER: ymfm がありません（無音でビルド）。tools\fetch_ymfm.cmd を実行してください。" />
+  </Target>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

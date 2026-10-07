@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第三章 FDI イメージの利用 - PC98PLAYER 取扱説明書</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="in">
+  <a class="brand" href="index.html">PC98PLAYER</a>
+  <a class="ch" href="index.html">目次</a>
+  <a class="ch" href="ch1.html">第一章 基本的な使い方</a>
+  <a class="ch" href="ch2.html">第二章 HDI イメージ</a>
+  <a class="ch cur" href="ch3.html">第三章 FDI イメージ</a>
+  <a class="ch" href="ch4.html">第四章 トラブルシューティング</a>
+  <a class="ch" href="ch5.html">第五章 メモリエディタ</a>
+</div></div>
+
+<div class="wrap">
+<header class="page">
+  <div class="kicker">第三章</div>
+  <h1>FDI イメージの利用</h1>
+  <p class="lead">フロッピーのイメージをまとめてセットしたり、本物のフロッピードライブを使ったりして、インストールアシスタントでゲームのインストーラを動かすスタイルです。</p>
+</header>
+
+<nav class="toc">
+  <strong>この章の内容</strong>
+  <ol>
+    <li><a href="#idea">考え方</a></li>
+    <li><a href="#formats">使えるイメージ・展開先</a></li>
+    <li><a href="#assistant">インストールアシスタントの画面</a></li>
+    <li><a href="#example">インストールしてみる（例）</a></li>
+    <li><a href="#swap">複数枚のディスクと入れ替え</a></li>
+    <li><a href="#finish">インストールが終わったら</a></li>
+    <li><a href="#realdrive">フロッピードライブからインストールする</a></li>
+    <li><a href="#drives">本物のドライブの詳細（USB フロッピー・Greaseweazle）</a></li>
+    <li><a href="#manual">INI を書いて手動でインストールする</a></li>
+    <li><a href="#keydisk">キーディスク・プロテクトについて</a></li>
+    <li><a href="#boot">フロッピーから直接起動するゲーム（ブートモード）</a></li>
+  </ol>
+</nav>
+
+<h2 id="idea">3-1. 考え方</h2>
+<p>フロッピー版のゲームは、実機と同じように<strong>ゲーム付属のインストーラでハードディスクへインストール</strong>してから遊びます。
+インストールアシスタントは、フロッピー（イメージまたは本物）とインストール先のフォルダ（ハードディスク）を用意して、インストーラを動かすところまでを手伝います。</p>
+<div class="flow">
+  <div class="step"><b>ドロップ</b>FDI（何枚でも）またはフロッピードライブ</div>
+  <div class="arrow">→</div>
+  <div class="step"><b>アシスタント</b>インストーラ・引数・ドライブ名を選ぶ</div>
+  <div class="arrow">→</div>
+  <div class="step"><b>インストール</b>ゲーム付属のインストーラが動く</div>
+  <div class="arrow">→</div>
+  <div class="step"><b>INI</b>起動するファイルを選んで作り、そのまま遊ぶ</div>
+</div>
+<div class="note">MS-DOS のファイルが入っていない独自形式のディスク（PC-98 初期の、フロッピーから直接起動するゲーム）は、インストールせずにそのまま起動します（<a href="#boot">3-11</a>）。</div>
+<div class="note">インストールアシスタントの画面から始めたときは、インストールが終わるまで <code>PC98PLAYER.INI</code> を作りません（インストール先に INI があれば、音などの設定だけ借ります）。</div>
+
+<h2 id="formats">3-2. 使えるイメージ・展開先</h2>
+<ul>
+  <li><strong>イメージ:</strong> FDI（Anex86）、D88（.D88 .D68 .88D .D98）、NFD（T98-Next の r0・r1）、ヘッダ無しのベタ（.HDM .XDF .DUP .TFD .2HD .IMG など）、フラックスイメージ（.SCP・.HFE）。形式の違うものを混ぜても構いません。</li>
+  <li><strong>インストール先:</strong> PC98PLAYER を起動したときの作業フォルダー（カレントフォルダ）です。作業フォルダーが Windows のフォルダの中やドライブの直下のときは、1 枚目のイメージの横にイメージと同じ名前のフォルダ（<code>DISK1.FDI</code> なら <code>DISK1</code>）を作ってそこへインストールします。インストール先は画面の左下に表示されます。</li>
+</ul>
+<div class="tip"><strong>ヒント:</strong> インストール先を決めておきたいときは、<a href="ch2.html#where">第二章 2-3</a>と同じく、作業フォルダーを指定したショートカットのリンク先の後ろにイメージを並べて書きます。</div>
+
+<h2 id="assistant">3-3. インストールアシスタントの画面</h2>
+<p>フロッピーイメージを <code>PC98PLAYER.EXE</code> にドロップすると（第 1 引数がフロッピーイメージのとき）、次の画面になります。</p>
+<figure>
+  <img src="images/ch3_assistant.png" alt="インストールアシスタントの画面" width="800" height="500">
+  <figcaption>図 3-1　インストールアシスタント。左にフロッピーの中身、右上に選んだファイルの中身、右下にドライブの設定があります。</figcaption>
+</figure>
+<div class="tablewrap">
+<table>
+  <tr><th>場所</th><th>はたらき</th></tr>
+  <tr><td>タイトル</td><td>中身を表示しているイメージの名前と「何枚目か」。右上の ◀ ▶ で、中身を見るディスクを切り替えます。</td></tr>
+  <tr><td>左: フロッピーの中身</td><td>フォルダ（[名前]）はクリックで開き、ファイルはクリックでインストーラに選びます。BAT・EXE・COM は白で表示。ダブルクリックでそのまま実行。最初は INSTALL.BAT などインストーラらしいファイルが選ばれています。ホイールで一覧を送れます。</td></tr>
+  <tr><td>右上: 中身</td><td>選んだ BAT やテキスト（README など）の先頭の行。インストーラがどんな引数（<code>%1</code> など）を待っているかの手がかりになります。実行ファイルは大きさを表示します。</td></tr>
+  <tr><td>引数</td><td>インストーラに渡す引数。クリックして入力します（<kbd>Tab</kbd> キーでも切り替え）。例: <code>B:</code></td></tr>
+  <tr><td>フロッピー / ハードディスク</td><td>それぞれのドライブ名（A〜F）。ハードディスク＝インストール先のフォルダです。同じ文字を選ぶと入れ替わります。</td></tr>
+  <tr><td>カレント</td><td>始めるときのカレントドライブ（フロッピーかハードディスクか）。</td></tr>
+  <tr><td>書き込み禁止</td><td>「する」（既定）で、フロッピーを書き込み禁止（ライトプロテクト）にして見せます。「ゲームディスクをライトプロテクト状態にして下さい」と確かめるインストーラ（下級生など）があるためです。インストーラがフロッピーへ書き込む必要があるときは「しない」にします。本物のドライブでは「つまみのまま」（ディスクのつまみに従う）になります。</td></tr>
+  <tr><td>左下</td><td>インストール先のフォルダと、実際に実行するコマンド（例: <code>A:\INSTALL.BAT B:</code>（カレント A:））。</td></tr>
+  <tr><td>実行（Enter）/ やめる（Esc）</td><td>インストーラを動かす / 何もせずに終わる。</td></tr>
+</table>
+</div>
+<div class="note"><strong>引数とドライブ名の決め方:</strong> 右上の中身を読んで、インストーラの説明に合わせます。多いのは次の 2 通りです。
+<ul>
+  <li>「<code>INSTALL インストール先</code>」の形（図 3-1 の <code>%1</code>）→ 引数にハードディスクのドライブ名（<code>B:</code> など）、カレントはフロッピー。</li>
+  <li>「今いるドライブへ写す。引数は転送元」の形 → 引数にフロッピーのドライブ名、カレントはハードディスク。</li>
+</ul>
+メニューを出して選ばせるインストーラなら、引数は空のままで構いません。</div>
+
+<h2 id="example">3-4. インストールしてみる（例）</h2>
+<ol class="steps">
+  <li><code>DISK1.FDI</code> と <code>DISK2.FDI</code> を選んで、まとめて <code>PC98PLAYER.EXE</code> にドロップします。</li>
+  <li>左の一覧で <code>INSTALL.BAT</code> が選ばれていることを確かめます。右上に <code>MD %1\SAMPLE</code> のような行が見えるので、引数にはインストール先のドライブを渡せばよいとわかります。</li>
+  <li>引数に <code>B:</code>、フロッピー <code>A</code>、ハードディスク <code>B</code>、カレントは「フロッピー」にして、「実行」を押します。</li>
+  <li>インストーラが動きます。ディスクの入れ替えを求められたら、<a href="#swap">次の節</a>のとおり入れ替えてからキーを押します。</li>
+</ol>
+<figure>
+  <img class="pixel" src="images/ch3_installing.png" alt="インストーラが 2 枚目のディスクを求めている画面" width="640" height="400">
+  <figcaption>図 3-2　インストーラが 2 枚目のディスクを求めているところ。</figcaption>
+</figure>
+
+<h2 id="swap">3-5. 複数枚のディスクと入れ替え</h2>
+<p>何枚かをまとめてドロップすると、名前順（DISK1、DISK2 …）に並べて、1 枚目を入れた状態から始めます。
+インストーラが「ディスク 2 を入れてください」と言ったら、<kbd>F11</kbd> を押して、下の「フロッピー」の欄で入れ替えます。</p>
+<figure>
+  <img src="images/ch3_f11_disks.png" alt="F11 の画面のフロッピーの欄" width="800" height="500">
+  <figcaption>図 3-3　F11 の画面の左下の「フロッピー」の欄。今のディスクが何枚目か（1 / 2 枚目）と、前後のディスクへ入れ替えるボタン（右上の「P: 前」「N: 次」）があります。</figcaption>
+</figure>
+<div class="tablewrap">
+<table>
+  <tr><th>キー / ボタン</th><th>はたらき</th></tr>
+  <tr><td><kbd>N</kbd> / 「N: 次」</td><td>次のディスクへ入れ替えます。</td></tr>
+  <tr><td><kbd>P</kbd> / 「P: 前」</td><td>前のディスクへ入れ替えます。</td></tr>
+  <tr><td><kbd>F</kbd> / 「F: 入れる／実機…」</td><td>メニューから何枚目かを選んで入れたり、別のイメージ・本物のドライブを選んだりします。</td></tr>
+  <tr><td><kbd>E</kbd> / 「E: 取り出す」</td><td>ディスクを取り出します。</td></tr>
+</table>
+</div>
+<p>入れ替えたら <kbd>Esc</kbd> で F11 の画面を閉じ、インストーラの指示どおりキーを押して続けます。</p>
+
+<h2 id="finish">3-6. インストールが終わったら</h2>
+<p>インストーラ（バッチ）が終わると、インストールアシスタントが次のように聞いてきます。</p>
+<ol class="steps">
+  <li>「ゲームを起動するファイルを選んで PC98PLAYER.INI を作りますか？」 → 「はい」で、インストール先のフォルダを開いたファイル選択が出ます。ゲームを起動するファイルを選んでください。</li>
+  <li><code>Start=</code>（選んだファイル）と <code>Drive=</code>（インストールのときのハードディスクのドライブ名）を書いた INI を作り、「続けてゲームを起動しますか？」と聞きます。</li>
+  <li>「はい」で、インストール先のフォルダの PC98PLAYER を起動し直して、ゲームが始まります。</li>
+</ol>
+<ul>
+  <li>最初の質問で「いいえ」を選ぶと、INI は作らずに画面をそのまま残します（インストーラのメッセージを読みたいときなど）。</li>
+  <li>インストール先に既に INI があるときは、「このフォルダの PC98PLAYER.INI でゲームを起動しますか？」とだけ聞きます。</li>
+  <li><code>Drive=</code> を書くのは、インストーラがドライブ名（B: など）をゲームの設定ファイルに書き込むことがあるためです。インストールのときと同じドライブ名で遊べるようにしています。</li>
+</ul>
+<p>次からは、インストール先のフォルダで<a href="ch1.html">第一章</a>のとおり起動してください。</p>
+
+<h2 id="realdrive">3-7. フロッピードライブからインストールする</h2>
+<p>イメージを作らなくても、ゲームのディスクを入れた本物のフロッピードライブ（USB フロッピーなど）から、そのままインストールできます。</p>
+<ol class="steps">
+  <li>ゲームの 1 枚目のディスクをドライブに入れます。</li>
+  <li>エクスプローラーで、そのドライブ（例: 「フロッピー ディスク ドライブ (A:)」）を <code>PC98PLAYER.EXE</code> にドロップします（第 1 引数に <code>A:\</code> を渡すのと同じ。<code>FDD:A</code> や、Greaseweazle の <code>GW</code> でも構いません）。</li>
+  <li>図 3-1 と同じインストールアシスタントの画面になります。ここからは <a href="#example">3-4</a> と同じです。</li>
+  <li>ディスクの入れ替えを求められたら、<strong>本物のドライブでディスクを入れ替えて</strong>、インストーラの指示どおりキーを押すだけです。</li>
+</ol>
+<ul>
+  <li><strong>入れ替えは自動で気づきます:</strong> しばらく（1.5 秒ほど）ディスクを触っていなかった後に読むとき、トラック 0 を読み直して中身が替わっていれば、自動で読み直します（F11 の画面の「読み直す」は要りません）。</li>
+  <li><strong>書き込み禁止:</strong> 本物のドライブでは「つまみのまま」が選べます。ディスクの書き込み禁止のつまみに従います。</li>
+  <li><strong>インストール先:</strong> 作業フォルダーが Windows のフォルダの中やドライブの直下のときは、<code>PC98PLAYER.EXE</code> の横の <code>PC98GAME</code> フォルダになります。</li>
+</ul>
+<div class="warn"><strong>注意:</strong> トラックを初めて読むとき、USB フロッピーは 1 トラック 0.3 秒ほど待ちます（ゲームが止まったように見えます）。PC-98 の 1.25MB のディスクを読むには、3 モード対応のドライブが必要です。プロテクトつきのディスクは USB フロッピーでは読めないことがあります（<a href="#keydisk">3-10</a>）。</div>
+
+<h2 id="drives">3-8. 本物のドライブの詳細（USB フロッピー・Greaseweazle）</h2>
+<p>本物のフロッピードライブは、インストールだけでなく、遊ぶときの仮想フロッピー（キーディスクなど）にも使えます。ディスクの中身は使うときにその場で読みます。</p>
+<div class="tablewrap">
+<table>
+  <tr><th></th><th>USB フロッピードライブ</th><th>Greaseweazle ＋ PC 用の FDD</th></tr>
+  <tr><td>読み方</td><td>Windows のドライバ経由で「セクタ番号」で読む</td><td>磁気信号（フラックス）をそのまま読み、PC98PLAYER が自分で復調する</td></tr>
+  <tr><td>普通のディスク（ファイルの読み書き・インストール）</td><td>○（書き込みも可）</td><td>○（読み込みのみ）</td></tr>
+  <tr><td>プロテクトつきの正規ディスク（キーディスクの確認）</td><td>×（ID のずれたセクタ・CRC エラー等を扱えない）</td><td>○（隠れたセクタ・CRC エラー・読むたびに変わるセクタ等もそのまま）</td></tr>
+  <tr><td>PC-98 の 1.25MB（2HD）</td><td>3 モード対応のドライブだけ</td><td>3.5 インチ・5 インチの 2HD ドライブ（回転数の違いは自動で合わせます）</td></tr>
+  <tr><td>初めて読むトラックの待ち時間</td><td>0.3 秒ほど</td><td>1 秒ほど</td></tr>
+</table>
+</div>
+<h3>つなぎ方</h3>
+<ul>
+  <li><strong>F11 の画面から:</strong> 「フロッピー」の欄の <kbd>F</kbd>（入れる／実機…）のメニューに、見つかった USB フロッピードライブ（「USB フロッピー A:（1.25MB 対応）」など）と Greaseweazle が出るので選びます。インストールアシスタント以外で使うときは、ディスクを入れ替えたら同じメニューの「読み直す」を選んでください。</li>
+  <li><strong>INI で:</strong> <code>FloppyDisk=FDD:A</code>（Windows のフロッピードライブ A:。<code>\\.\A:</code> とも書けます）、<code>FloppyDisk=GW</code>（Greaseweazle を USB の ID で探します。見つからないときは <code>GW:COM5</code> のようにポートを指定）。<code>FloppyDisk=</code> は <code>FloppyImage=</code> と同じ意味で、どちらで書いても構いません。</li>
+  <li><strong>Greaseweazle の設定:</strong> <code>GWDrive=A</code>（PC のケーブルのドライブ A / B。Shugart 接続なら 0 / 1 / 2）、<code>GWRevs=3</code>（1 トラックを何回転ぶん読むか。1〜8。多いほど読みにくいディスクに強く、遅くなります）。</li>
+  <li><strong>イメージとして残す:</strong> メニューの「今のディスクを D88 で保存」で、全トラックを読んで D88 に書き出せます（ID・CRC エラー・デリーテッドデータは残ります。読むたびに変わるセクタは 1 回分だけ）。次からはそのイメージを使えば本物のドライブが要りません。例: <code>samples\slayers.INI</code>（スレイヤーズ！のキーディスクを Greaseweazle で吸い出して使う）。</li>
+</ul>
+<div class="warn"><strong>注意:</strong><br>
+・USB フロッピーへの書き込みは、Windows からそのドライブを一時的に切り離せた（ボリュームをロックできた）ときだけ行います。できないときは書き込み禁止のディスクとして扱います。ドライブを開けないときは「管理者として実行」すると開ける場合があります。<br>
+・USB フロッピーで読めないセクタがあると、トラックごとに 2 回、セクタごとに 5 回まで、ヘッドを動かし直して読み直します。<br>
+・Greaseweazle は読み込みだけです。セーブを書き込むゲームは、先に D88 で保存してからそのイメージで遊んでください。</div>
+
+<h2 id="manual">3-9. INI を書いて手動でインストールする</h2>
+<p>インストールアシスタントを使わずに、INI にフロッピーとインストーラを書いてインストールすることもできます。空のフォルダ（インストール先）に次のような <code>PC98PLAYER.INI</code> を置いて起動します。</p>
+<pre>; 「転送元のフロッピーのドライブ名を引数で渡し、今いるドライブへ写す」インストーラの例
+[PC98PLAYER]
+Drive=A
+FloppyImage=SLAYERS_B.d88
+FloppyDrive=B
+Start=B:\INST.EXE
+Args=B
+CurrentDrive=A
+ExitOnEnd=0</pre>
+<ul>
+  <li><code>Start=B:\INSTALL.BAT</code> のようにドライブ付きで書くと、そのドライブをカレントにして実行します。<code>CurrentDrive=</code> で別のドライブをカレントにもできます。<br>「カレントドライブにインストールする」インストーラ（実機では <code>A&gt;</code> から <code>B:INSTALL</code> と打って使うもの。同級生など）は、<code>Start=B:\INSTALL.EXE</code> と <code>CurrentDrive=A</code>（ゲームのフォルダ）を一緒に書きます。書かないとカレントがフロッピーになり、「カレントドライブがハードディスクドライブではありません」と止まります。<br>説明書に「A:\NANPA を作り、そこをカレントにして実行」とあるもの（「カレントディレクトリーがルートディレクトリーです」と止まるもの）は、<code>CurrentDirectory=A:\NANPA\</code> を書きます。フォルダはゲームのフォルダの下に自動で作られ、インストール先も <code>NANPA</code> フォルダになります。遊ぶときは <code>Start=NANPA\NANPA.BAT</code> とします。</li>
+  <li>フロッピーを A: にしないと動かないインストーラは、<code>Drive=B</code>・<code>FloppyDrive=A</code> のように入れ替えます。</li>
+  <li>インストーラが <code>COMMAND.COM /C COPY …</code> のように呼ぶ内部コマンド（COPY・MD・DEL など）にも対応しています。</li>
+  <li>インストールが終わったら、<code>Start=</code> などをゲームの起動用に書き換えます（<code>FloppyImage=</code> はキーディスクが要らなければ消します）。</li>
+</ul>
+<h3>フロッピードライブを 2 台使うインストーラ</h3>
+<p>「インストーラのディスクを 2 台目のドライブに、データのディスクを 1 台目のドライブに」のように、2 台のドライブを前提にしたインストーラは、
+<code>FloppyDisk2=</code>・<code>FloppyDrive2=</code> で 2 台目にもディスクを入れます。例: ドライブ A: をハードディスク（インストール先）、B: を 1 台目、C: を 2 台目にする場合</p>
+<pre>[PC98PLAYER]
+Drive=A
+FloppyDrive=B
+FloppyDisk=DN4_A.NFD     ; 1 台目（B:）: 最初に求められるデータのディスク
+FloppyDrive2=C
+FloppyDisk2=DN4_C.NFD    ; 2 台目（C:）: インストーラ（INSTALL.EXE）のあるディスク
+Start=C:\INSTALL.EXE
+Args=A:
+FloppyWriteProtect=1     ; 「ライトプロテクト状態ではありません」と止まるインストーラ向け
+ExitOnEnd=0</pre>
+<ul>
+  <li>「○ディスクをドライブ１に入れて下さい」と出たら、<kbd>F11</kbd> の画面のフロッピーの欄で、操作するドライブ（<kbd>D</kbd> で切り替え）を 1 台目にして、<kbd>N</kbd>／<kbd>P</kbd> で求められたディスクにします。</li>
+  <li>ディスクの入れ替えを「いったん抜かれて、また入った」ことで確かめるインストーラもあるので、入れ替えた直後はディスク BIOS の SENSE に少しの間「準備ができていない」と答えます（実機でディスクを抜き差ししたときと同じ）。求められたディスクが最初から入っていて先へ進まないときは、同じディスクをもう一度入れ直してください。</li>
+  <li>「フロッピーディスクがライトプロテクト状態ではありません」と止まるときは、<code>FloppyWriteProtect=1</code> を書くと、入れるディスクがすべて書き込み禁止になります。1 枚ずつなら、<kbd>F11</kbd> →「F: 入れる／実機…」のメニューの「書き込み禁止（ライトプロテクト）」で切り替えられます（入れ替えると、そのイメージの元の状態に戻ります）。</li>
+  <li>インストールが終わったら、<code>Start=</code> を作られた起動用のバッチ（例: <code>DRA4\DRA4.BAT</code>）に書き換え、<code>FloppyDisk=</code> などは消します。</li>
+</ul>
+
+<h2 id="keydisk">3-10. キーディスク・プロテクトについて</h2>
+<p>PC98PLAYER のディスク BIOS（INT 1Bh）は、ID を指定したセクタの読み込み・READ ID・READ DIAGNOSTIC などに応え、イメージに記録されたセクタの ID・CRC エラー・デリーテッドデータ、
+読むたびに内容が変わるセクタもそのまま返します。そのため、プロテクトの情報まで記録されたイメージ（D88・NFD r1 など）や Greaseweazle で読んだディスクなら、キーディスクの確認を通ることがあります。</p>
+<ul>
+  <li>FDI・ベタには特殊なセクタの情報が無いので、プロテクトつきのディスクの確認は通りません。</li>
+  <li>USB フロッピーは、Windows のドライバが特殊なセクタを扱えないため、確認を通りません。</li>
+  <li>インストール後、遊ぶたびにマスターディスクを求めるゲームは、<a href="ch1.html#floppy">第一章 1-7</a>のとおり <code>FloppyImage=</code> にそのディスクのイメージ（または本物のドライブ）を書いておきます。</li>
+  <li>確認で先へ進まないときは<a href="ch4.html#floppy">第四章 4-7</a>を見てください。</li>
+</ul>
+
+<h2 id="boot">3-11. フロッピーから直接起動するゲーム（ブートモード）</h2>
+<p>PC-98 が出たばかりのころのゲーム（PC-88 からの移植など）には、MS-DOS を使わず、電源を入れるとフロッピーの起動プログラム（IPL）から直接立ち上がるものが多くあります。
+ハードディスクへのインストールも無く、ディスクの中身はファイルの形になっていないので、フォルダへ展開もできません。
+PC98PLAYER は、こうしたディスクを<strong>ブートモード</strong>で、実機と同じようにフロッピーから起動します。</p>
+<div class="flow">
+  <div class="step"><b>ドロップ</b>ディスクのイメージ（何枚でも）</div>
+  <div class="arrow">→</div>
+  <div class="step"><b>判定</b>MS-DOS のファイル表が無く、起動用のセクタがある</div>
+  <div class="arrow">→</div>
+  <div class="step"><b>INI</b>イメージのフォルダに自動で作る</div>
+  <div class="arrow">→</div>
+  <div class="step"><b>起動</b>1 台目のドライブから立ち上がる</div>
+</div>
+<h3>始め方</h3>
+<ol>
+  <li>ゲームのディスクのイメージ（D88 など）を 1 つのフォルダにまとめます。</li>
+  <li>全部まとめて <code>PC98PLAYER.EXE</code> にドロップします。</li>
+  <li>どのディスクにも MS-DOS のファイル表が無く、起動用のセクタを持つディスクがあれば、ブートモードで起動します（1 枚でも MS-DOS のディスクが混じっていれば、今までどおりインストールアシスタントになります）。</li>
+  <li>名前順で最初の起動ディスクが 1 台目のドライブに、残りの最初の 1 枚が 2 台目のドライブに入ります。</li>
+  <li>イメージのフォルダに <code>PC98PLAYER.INI</code>（<code>Boot=FD</code>）を作るので、次からはそのフォルダに <code>PC98PLAYER.EXE</code> を置いてダブルクリックするか、<a href="ch1.html#shared">ショートカット</a>から起動できます。</li>
+</ol>
+<h3>ディスクの入れ替え（ドライブ 2 台）</h3>
+<p>ブートモードでは、実機と同じくフロッピードライブが 2 台あります。<kbd>F11</kbd> の画面のフロッピーの欄で:</p>
+<ul>
+  <li><kbd>D</kbd>（または見出しのボタン）で、操作するドライブを「ドライブ1」⇔「ドライブ2」と切り替えます。下の行に、もう一方のドライブに入っているディスクが出ます。</li>
+  <li><kbd>N</kbd>／<kbd>P</kbd> で、そのドライブのディスクを、フォルダにあるイメージの中で次／前のものに入れ替えます。<kbd>F</kbd> で別のイメージや本物のドライブも選べます。</li>
+  <li>ゲームのセーブは、実機と同じくディスク（イメージファイル）へ書き込まれます。大事なイメージは先にコピーを取ってください。</li>
+  <li>ステートセーブは、2 台のドライブに入っていたディスクも覚えています。</li>
+</ul>
+<h3>INI の項目</h3>
+<div class="tablewrap">
+<table>
+  <tr><th>項目</th><th>説明</th></tr>
+  <tr><td><code>Boot=FD</code></td><td>MS-DOS を使わず、1 台目のドライブのフロッピーから起動します。<code>Start=</code> は要りません。</td></tr>
+  <tr><td><code>FloppyDisk=</code></td><td>1 台目のドライブに入れるディスク（起動ディスク）。</td></tr>
+  <tr><td><code>FloppyDisk2=</code></td><td>2 台目のドライブに入れるディスク（<code>FloppyImage2=</code> と書いても同じ）。</td></tr>
+</table>
+</div>
+<p>当時のソフトは 8MHz・10MHz の機種で作られているので、自動で作る INI は <code>CpuMHz=10</code>・<code>SoundBoard=26</code> にしてあります。速すぎるときや音が出ないときは変えてみてください（変えたら <kbd>F11</kbd> → <kbd>R</kbd> で試せます）。</p>
+<h3>動かないもの</h3>
+<ul>
+  <li><strong>N88-BASIC を使うソフト:</strong> 本体の ROM に入っている N88-BASIC(86) で動くソフト（BASIC で書かれたゲームや、起動後に BASIC を呼ぶもの）は、PC98PLAYER には ROM が無いので動きません。
+    ROM の BASIC を呼び出したことを見つけると、「このソフトをプレイするにはPC98実機またはそのROMデータを搭載した仮想マシンが必要です」と表示して終わります。
+    例えば、アリスソフトの『ランス ―光をもとめて―』（配布フリー版）は、起動ディスクの読み込みのあと ROM の BASIC を呼ぶため、この表示になります。</li>
+  <li><strong>FDC を直接操作するもの:</strong> ディスク BIOS（INT 1Bh）を使わず、フロッピーの制御装置を直接動かして読むソフト（プロテクトなど）は動きません。</li>
+  <li><strong>BIOS の ROM を直接呼ぶもの:</strong> 割込みではなく ROM の中の番地を直接呼ぶソフトは、その旨を表示して止まります。</li>
+</ul>
+
+<div class="pager">
+  <a class="prev" href="ch2.html"><small>← 前へ</small>第二章 HDI イメージの利用</a>
+  <a class="next" href="ch4.html"><small>次へ →</small>第四章 トラブルシューティング集</a>
+</div>
+</div>
+</body>
+</html>

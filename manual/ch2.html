@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第二章 HDI イメージの利用 - PC98PLAYER 取扱説明書</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="in">
+  <a class="brand" href="index.html">PC98PLAYER</a>
+  <a class="ch" href="index.html">目次</a>
+  <a class="ch" href="ch1.html">第一章 基本的な使い方</a>
+  <a class="ch cur" href="ch2.html">第二章 HDI イメージ</a>
+  <a class="ch" href="ch3.html">第三章 FDI イメージ</a>
+  <a class="ch" href="ch4.html">第四章 トラブルシューティング</a>
+  <a class="ch" href="ch5.html">第五章 メモリエディタ</a>
+</div></div>
+
+<div class="wrap">
+<header class="page">
+  <div class="kicker">第二章</div>
+  <h1>HDI イメージの利用</h1>
+  <p class="lead">ハードディスクイメージの中身をインストールアシスタントでフォルダへ展開し、INI を作ってゲームを始めるスタイルです。</p>
+</header>
+
+<nav class="toc">
+  <strong>この章の内容</strong>
+  <ol>
+    <li><a href="#idea">考え方</a></li>
+    <li><a href="#formats">使えるイメージ</a></li>
+    <li><a href="#where">展開先のフォルダの決まり方</a></li>
+    <li><a href="#steps">3 手で遊ぶ</a></li>
+    <li><a href="#rules">展開のきまり</a></li>
+    <li><a href="#choose">起動するファイルの選び方</a></li>
+    <li><a href="#after">次からの起動</a></li>
+    <li><a href="#trouble">うまく始まらないとき</a></li>
+  </ol>
+</nav>
+
+<h2 id="idea">2-1. 考え方</h2>
+<p>ハードディスクイメージの形で配られているソフト（フリー宣言されたタイトルなど）は、PC98PLAYER ではイメージをそのまま開いて動かすのではなく、
+<strong>中身をふつうのフォルダへ展開してから</strong>遊びます。展開したあとは<a href="ch1.html">第一章</a>の「ゲームのフォルダ」と同じものになるので、
+セーブデータの確認・バックアップや、ファイルの差し替えも Windows のエクスプローラーで気軽にできます。</p>
+<div class="flow">
+  <div class="step"><b>イメージ</b>SAMPLE.HDI</div>
+  <div class="arrow">→</div>
+  <div class="step"><b>インストールアシスタント</b>中身をフォルダへ展開</div>
+  <div class="arrow">→</div>
+  <div class="step"><b>INI</b>起動するファイルを選んで作る</div>
+  <div class="arrow">→</div>
+  <div class="step"><b>ゲームのフォルダ</b>第一章と同じ遊び方</div>
+</div>
+
+<h2 id="formats">2-2. 使えるイメージ</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>形式</th><th>拡張子の例</th><th>作ったエミュレータなど</th></tr>
+  <tr><td>HDI</td><td>.HDI</td><td>Anex86 など</td></tr>
+  <tr><td>NHD</td><td>.NHD</td><td>T98-Next</td></tr>
+  <tr><td>THD</td><td>.THD</td><td>T98</td></tr>
+  <tr><td>ヘッダ無しのベタ</td><td>.HDD</td><td>—</td></tr>
+</table>
+</div>
+<p>PC-98 の区画表から MS-DOS の区画（FAT12 / FAT16）を探します。セクタ長は 256 / 512 バイトのどちらでも構いません。</p>
+
+<h2 id="where">2-3. 展開先のフォルダの決まり方</h2>
+<p>展開先は、PC98PLAYER を起動したときの<strong>作業フォルダー（カレントフォルダ）</strong>です。ただし作業フォルダーが Windows のフォルダの中やドライブの直下のときは、
+間違って散らからないように、<strong>イメージの横にイメージと同じ名前のフォルダ</strong>を作ってそこへ展開します（<code>C:\PC98\SAMPLE.HDI</code> なら <code>C:\PC98\SAMPLE</code>）。</p>
+<p>どこへ展開するかは、始める前の確認の画面（図 2-1）に必ず表示されます。思った場所でなければ「いいえ」でやめて、次のどちらかで始め直してください。</p>
+<ul>
+  <li><strong>ショートカットで:</strong> <code>PC98PLAYER.EXE</code> のショートカットを作り、「作業フォルダー」に展開先（空のフォルダがおすすめ）、「リンク先」の後ろにイメージのパスを書きます。<br>
+    例: リンク先 <code>C:\PC98PLAYER\PC98PLAYER.EXE C:\PC98\SAMPLE.HDI</code>、作業フォルダー <code>C:\PC98\GAMES\SAMPLE</code></li>
+  <li><strong>コマンドプロンプトで:</strong> 展開先のフォルダへ <code>cd</code> してから <code>C:\PC98PLAYER\PC98PLAYER.EXE C:\PC98\SAMPLE.HDI</code>。</li>
+</ul>
+
+<h2 id="steps">2-4. 3 手で遊ぶ</h2>
+<div class="flow">
+  <div class="step"><b>1 手目</b>イメージを <code>PC98PLAYER.EXE</code> にドロップ</div>
+  <div class="arrow">→</div>
+  <div class="step"><b>2 手目</b>確認に「はい」</div>
+  <div class="arrow">→</div>
+  <div class="step"><b>3 手目</b>最初に実行するファイルを選ぶ</div>
+</div>
+
+<h3>1 手目: イメージを渡す</h3>
+<p>エクスプローラーでイメージファイル（.HDI など）を <code>PC98PLAYER.EXE</code> のアイコンにドロップします（第 1 引数にイメージを渡すのと同じです）。</p>
+
+<h3>2 手目: 展開先を確かめて「はい」</h3>
+<figure>
+  <img src="images/ch2_confirm.png" alt="展開の確認の画面" width="431" height="152">
+  <figcaption>図 2-1　インストールアシスタントの確認。イメージの形式・MS-DOS の区画の数・展開先のフォルダが表示されます。</figcaption>
+</figure>
+<p>「はい」を押すと、ファイルとフォルダをそのまま書き出します（ファイルの日付も元のとおり）。
+すべて問題なく展開できたときは、結果のお知らせは出さずにそのまま次へ進みます。</p>
+
+<h3>3 手目: 最初に実行するファイルを選ぶ</h3>
+<figure>
+  <img src="images/ch2_select_start.png" alt="最初に実行するファイルの選択" width="490" height="313">
+  <figcaption>図 2-2　展開したフォルダが開いた状態で、最初に実行するファイルを選びます。最初は AUTOEXEC.BAT が選ばれています。</figcaption>
+</figure>
+<p>選んだファイル名を <code>Start=</code> に書いた <code>PC98PLAYER.INI</code> を作り、そのままゲームが始まります。</p>
+<figure>
+  <img class="pixel" src="images/ch2_running.png" alt="展開したゲームが動いている画面" width="640" height="400">
+  <figcaption>図 2-3　展開したゲームが始まったところ（画面はサンプル）。</figcaption>
+</figure>
+
+<h2 id="rules">2-5. 展開のきまり</h2>
+<ul>
+  <li><strong>上書きしません:</strong> 同じ名前のファイルが既にあるときは飛ばします。やり直したいときは、展開先を空にしてからもう一度ドロップしてください。</li>
+  <li><strong>区画が 2 つ以上あるとき:</strong> 1 つ目の区画を展開先へ、2 つ目からは展開先の中の <code>DRIVE_B</code>・<code>DRIVE_C</code>… のフォルダへ展開します。ゲームが 2 つ目の区画を B: として使う場合は、中身を移すなどしてください。</li>
+  <li><strong>結果のお知らせ:</strong> 飛ばしたファイル・読めなかったものがあったとき、区画が 2 つ以上あったときだけ、ファイル選択の前に結果（数と内容）を表示します。</li>
+  <li>日本語のファイル名・サブフォルダ・ボリュームラベルのある区画も、そのまま展開できます。削除済みのファイルは展開しません。</li>
+</ul>
+
+<h2 id="choose">2-6. 起動するファイルの選び方</h2>
+<ul>
+  <li>ハードディスクにインストールされたゲームは、PC-98 の起動と同時に <code>AUTOEXEC.BAT</code> から始まるものが多いので、最初は AUTOEXEC.BAT が選ばれています。</li>
+  <li>AUTOEXEC.BAT の中の、PC98PLAYER には要らないもの（マウスドライバ・SMARTDRV など）は見つからないとして飛ばして先へ進みます。</li>
+  <li>メニュー（MENU.BAT など）やゲームのフォルダの中の起動ファイルを直接選んでも構いません。サブフォルダの中のファイル（例: <code>GAME\GAME.EXE</code>）を選ぶと <code>Start=GAME\GAME.EXE</code> になり、そのフォルダをカレントにして起動します。</li>
+  <li>ファイル選択を「キャンセル」で閉じると、<code>Start=</code> が空の INI だけを作って終わります。INI をメモ帳で開いて <code>Start=</code> を書いてから、そのフォルダで起動してください。</li>
+</ul>
+
+<h2 id="after">2-7. 次からの起動</h2>
+<p>展開したフォルダは、<a href="ch1.html">第一章</a>の「ゲームのフォルダ」そのものです。フォルダに <code>PC98PLAYER.EXE</code> をコピーしてダブルクリックするか、
+<a href="ch1.html#shared">EXE を使い回すショートカット</a>から起動してください。イメージファイルはもう要りません（元のイメージは保存しておくと安心です）。</p>
+
+<h2 id="trouble">2-8. うまく始まらないとき</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>症状</th><th>対処</th></tr>
+  <tr><td>「ハードディスクイメージを読めません」</td><td>イメージが壊れているか、MS-DOS の区画が無い（ほかの OS の区画だけ）イメージです。</td></tr>
+  <tr><td>コマンドの一覧やプロンプトのような画面で止まる</td><td>AUTOEXEC.BAT がメニューや別のドライブを前提にしていることがあります。<code>ExitOnEnd=0</code> にして最後のメッセージを読み、ゲームの起動ファイルを直接 <code>Start=</code> に書いてください。</td></tr>
+  <tr><td>「〇ドライブが見つかりません」など、ドライブ名が合わない</td><td>ゲームが C: や A: など特定のドライブを前提にしています。<code>Drive=C</code> のようにゲームのフォルダのドライブ名を合わせます。</td></tr>
+  <tr><td>2 つ目の区画のデータが見つからない</td><td><code>DRIVE_B</code> の中身をゲームのフォルダへ移すか、ゲームの設定を合わせてください。</td></tr>
+</table>
+</div>
+<p>それでも動かないときは、<a href="ch4.html">第四章</a>を見てください。</p>
+
+<div class="pager">
+  <a class="prev" href="ch1.html"><small>← 前へ</small>第一章 基本的な使い方</a>
+  <a class="next" href="ch3.html"><small>次へ →</small>第三章 FDI イメージの利用</a>
+</div>
+</div>
+</body>
+</html>

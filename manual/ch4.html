@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第四章 トラブルシューティング集 - PC98PLAYER 取扱説明書</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="in">
+  <a class="brand" href="index.html">PC98PLAYER</a>
+  <a class="ch" href="index.html">目次</a>
+  <a class="ch" href="ch1.html">第一章 基本的な使い方</a>
+  <a class="ch" href="ch2.html">第二章 HDI イメージ</a>
+  <a class="ch" href="ch3.html">第三章 FDI イメージ</a>
+  <a class="ch cur" href="ch4.html">第四章 トラブルシューティング</a>
+  <a class="ch" href="ch5.html">第五章 メモリエディタ</a>
+</div></div>
+
+<div class="wrap">
+<header class="page">
+  <div class="kicker">第四章</div>
+  <h1>トラブルシューティング集</h1>
+  <p class="lead">症状ごとの対処と、原因を調べる記録（トレース）の取り方、不具合を報告するときのお願いです。</p>
+</header>
+
+<nav class="toc">
+  <strong>この章の内容</strong>
+  <ol>
+    <li><a href="#close">すぐにウインドウが閉じる</a></li>
+    <li><a href="#crash">途中で落ちる・固まる・黒い画面のまま</a></li>
+    <li><a href="#y2k">日付がおかしい（2000 年問題）</a></li>
+    <li><a href="#screen">画面がおかしい</a></li>
+    <li><a href="#sound">音が出ない・おかしい</a></li>
+    <li><a href="#mouse">マウス・キーボード・ゲームパッド</a></li>
+    <li><a href="#floppy">フロッピー・キーディスク</a></li>
+    <li><a href="#assistant">インストールアシスタント</a></li>
+    <li><a href="#security">セキュリティソフトの警告</a></li>
+    <li><a href="#trace">トレース（記録）の取り方</a></li>
+    <li><a href="#report">不具合を報告するとき</a></li>
+    <li><a href="#limits">対応していないもの</a></li>
+    <li><a href="#faq">よくある質問</a></li>
+  </ol>
+</nav>
+
+<p>まず、1 回に 1 項目ずつ設定を変えて試してください。どれで症状が変わったかを覚えておくと、原因の特定にとても役立ちます。</p>
+
+<h2 id="close">4-1. すぐにウインドウが閉じる</h2>
+<ol class="steps">
+  <li>INI に <code>ExitOnEnd=0</code> を書いて起動し直します。窓が閉じずに残るので、ゲームやバッチが最後に出したメッセージ（「メモリが足りません」「ファイルがありません」など）が読めます。</li>
+  <li><code>Start=</code> が正しいか確認します。ゲームの説明書で「〇〇.BAT で起動」とあるものを指定してください。</li>
+  <li>インストールが済んでいるか確認します。フロッピーの中身をコピーしただけでは動かないゲームがあります（<a href="ch3.html">第三章</a>）。</li>
+</ol>
+
+<h2 id="crash">4-2. 途中で落ちる・固まる・黒い画面のまま</h2>
+<p>上から順に 1 つずつ INI に書いて試します。</p>
+<div class="tablewrap">
+<table>
+  <tr><th>順番</th><th>INI に書く内容</th><th>これで直った場合の原因</th></tr>
+  <tr><td>1</td><td><code>FirstMCB=0100</code>（次に <code>0400</code>、<code>0600</code> も）</td><td>ゲームが、メモリ上の読み込み位置を前提にしている</td></tr>
+  <tr><td>2</td><td><code>EMS=0</code></td><td>EMS を使う処理</td></tr>
+  <tr><td>3</td><td><code>XMS=0</code></td><td>XMS を使う処理</td></tr>
+  <tr><td>4</td><td><code>SoundBoard=26</code></td><td>86 ボード（PCM など）を使う処理</td></tr>
+  <tr><td>5</td><td><code>MouseDriver=0</code></td><td>マウスドライバの有無の判定</td></tr>
+  <tr><td>6</td><td><code>CpuMHz=8</code> または <code>CpuMHz=33</code></td><td>実行速度（タイミング）に依存する処理</td></tr>
+  <tr><td>7</td><td><code>DOSVersion=3.30</code></td><td>DOS の版の判定</td></tr>
+  <tr><td>8</td><td><code>IdleSkip=0</code></td><td>割込み待ちの空回りを止める働き（早送りを速くする仕組み）</td></tr>
+</table>
+</div>
+<div class="note">直った設定はそのまま使い続けて構いません。その設定と結果を<a href="#report">報告</a>していただけると、ほかの利用者の役にも立ちます。</div>
+
+<h2 id="y2k">4-3. 日付がおかしい・2000 年以降だと動かない（2000 年問題）</h2>
+<p>1990 年代のソフトには、西暦を下 2 桁で扱っていて 2000 年以降の日付で誤動作するもの（年齢や経過日数の計算がおかしくなる、起動しない、セーブの日付が壊れる など）があります。INI で日付を 1999 年以前に見せかけると回避できます。</p>
+<pre>FakeYear=1998          ; 年だけ 1998 年にする（今日が 9 月 27 日なら 1998/09/27）
+FakeDate=1999/12/31    ; 起動した日を 1999 年 12 月 31 日にする（翌日になれば 2000/01/01）</pre>
+<ul>
+  <li>ゲームが DOS や BIOS から読む日付・曜日のすべてに効きます。ファイルの日付も、見せかけた「今日」より新しいものは今日の日付として見せます（Windows 上の実際の日付は変わりません）。</li>
+  <li>書式は <code>1999/12/31</code>・<code>1999-12-31</code>・<code>19991231</code> のどれでも構いません（1980〜2099 年）。</li>
+  <li><code>FakeDate=1999/12/31</code> のまま日付をまたぐと 2000 年になります。長く遊ぶ場合は <code>FakeYear=</code> の方が安全です。</li>
+</ul>
+
+<h2 id="screen">4-4. 画面がおかしい</h2>
+<ul>
+  <li><strong>文字化け・字が欠ける:</strong> <code>KanjiJIS=83</code> を試します。<code>PC98PLAYER.EXE --fontsheet</code> で字形の一覧（PC98FONT.BMP）を確認できます。</li>
+  <li><strong>縦縞や余計な模様が出る・一部が隠れない:</strong> 画面の組み合わせ（テキストとグラフィックの重ね方）の問題です。ステートセーブでその場面を保存し、スロットのファイルを報告に添えてください。</li>
+  <li><strong>動きが速すぎる／遅すぎる:</strong> <code>CpuMHz=</code> を調整します。</li>
+  <li><strong>ぼやける／ドットが粗い:</strong> <code>Smooth=</code> と <code>Scale=</code> で調整します。</li>
+</ul>
+
+<h2 id="sound">4-5. 音が出ない・おかしい</h2>
+<ul>
+  <li><strong>BGM がまったく鳴らない:</strong> <code>Start=</code> がゲーム本体を直接指していて、サウンドドライバ（MUSIC.COM・PMD.COM など）が組み込まれていないことがあります。CONFIG.SYS の <code>SHELL=</code> に書かれたプログラムや <code>AUTOEXEC.BAT</code> など、ドライバを組み込んでからゲームを起動するものを <code>Start=</code> に書いてください（例: メルクリウスプリティは <code>Start=MPSTART.COM</code>）。</li>
+  <li><strong>「メモリスイッチのサウンドを『サウンド BIOS を切り離す』にしてください」とマニュアルにあるソフト:</strong> PC98PLAYER にはサウンド BIOS が無いので、何も設定しなくてもその状態です（Dante98 の MUSIC.COM などはそのまま鳴ります）。</li>
+  <li><code>SoundBoard=26</code> と <code>SoundBoard=86</code> を切り替えてみます。</li>
+  <li>ゲーム側の音源設定（「FM 音源」「MIDI」など）を確認します。ゲームの設定画面で「MIDI」が選べないときは、INI に <code>MIDI=1</code> があるか確認してください（<kbd>F11</kbd> →「S: 画面＆サウンド設定」の「MIDI を使う」にチェックを入れて保存しても同じです）。<br>「MIDI（MPU）」を選ぶと止まるゲームは、<code>MIDI=0</code> で MIDI ボードが無いのに MPU を待ち続けています。<code>MIDI=1</code> にしてください。「MIDI（RS-232C）」も <code>MIDI=1</code> のときだけ音が出ます。</li>
+  <li>音が小さいときは <code>Volume=200</code> くらいまで上げてみます（FM と PCM の釣り合いは <code>FMVolume=</code>・<code>PCMVolume=</code> で）。</li>
+  <li>「MIDI のときだけ曲が遅い」ときは <code>MidiSpeedFix=130</code> などを試します。</li>
+  <li>Windows の音量ミキサーで PC98PLAYER がミュートになっていないか確認します。</li>
+</ul>
+
+<h2 id="mouse">4-6. マウス・キーボード・ゲームパッド</h2>
+<ul>
+  <li><strong>マウスが動かない:</strong> ウインドウを 1 回クリックしてマウスを捕まえてください（<kbd>F12</kbd> か中ボタンで放します）。</li>
+  <li><strong>マウスで固まる・カーソルが二重になる:</strong> ゲームが自前でマウスを読む場合は <code>MouseDriver=0</code> を試します。</li>
+  <li><strong>マウスが速すぎる／遅すぎる:</strong> <code>MouseSpeed=</code>（%）で調整します。</li>
+  <li><strong>マウスを使わないゲームで窓の行き来が面倒:</strong> <code>MouseLockDisable=1</code> でマウスを捕まえなくなります。</li>
+  <li><strong>マウスを使うゲームで、メモリエディタなどほかの窓へマウスを持っていくのが面倒:</strong> <code>MouseLockDisable=2</code> にすると、マウスを捕まえずに、カーソルがゲームの画面の上にある間だけゲームへ送ります（<kbd>F12</kbd> で放す必要がありません）。</li>
+  <li><strong>ゲームパッドが効かない:</strong> 使い始めると画面の下に「ゲームパッドを使います: （名前）」と出ます。出ないときは Windows の「USB ゲーム コントローラーのセットアップ」（<code>joy.cpl</code>）に出ているか確かめ、2 台以上あるなら <code>JoyDevice=</code> で番号を選びます。ゲームパッドは窓が前に出ているときだけ効きます。</li>
+  <li><strong>ゲームパッドで方向は動くがボタンが効かない／その逆:</strong> ジョイスティックに対応していないゲームです。<code>JoyDirection=CURSOR</code> と <code>JoyButton1=RETURN</code> のようにキーを割り当てます（<a href="ch1.html#gamepad">第一章 1-11</a>）。ゲームの設定画面で「ジョイスティック」を選ぶ必要があるソフトもあります。</li>
+  <li><strong>INI の変更を試すたびに起動し直すのが面倒:</strong> <kbd>F11</kbd> → <kbd>R</kbd>（プログラム再起動）で INI を読み直します（<a href="ch1.html#reload">第一章 1-8</a>）。</li>
+  <li><strong>キーが押しっぱなしで暴走する:</strong> <code>KeyRepeat=0</code> を試します。</li>
+</ul>
+
+<h2 id="floppy">4-7. フロッピー・キーディスク</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>症状</th><th>原因と対処</th></tr>
+  <tr><td>「Disk A を入れて下さい」「マスターディスクを入れてください」などと言われて進まない</td><td>ゲームがキーディスク（マスターディスク）で正規品かどうかを確かめています。INI の <code>FloppyImage=</code> に求められているディスクのイメージ（または本物のドライブ）を書いておきます（<a href="ch1.html#floppy">第一章 1-7</a>）。ゲームがドライブ名を決め打ちしているときは <code>FloppyDrive=</code> も合わせます。ファイルがあるかを確かめるだけのゲームなら、ディスクの中身をコピーしたフォルダを <code>FloppyImage=</code> に書くだけでも通ります。</td></tr>
+  <tr><td>ディスクを入れても確認を通らない。<code>Trace=1</code> のログに「<code>[fd] セクタが見つかりません: C=07 H=00 R=4B …</code>」がある</td><td>ゲームが確認に使う特殊なセクタが、イメージに記録されていません（吸い出しのときに読み取れなかったもの）。PC98PLAYER 側では補えないので、別のドライブや別のモード（NFDMAKE なら <code>-r1</code> と <code>-r1d</code> の両方）で吸い出し直すか、Greaseweazle で読んでください。FDI・ベタのイメージではプロテクトは通りません。</td></tr>
+  <tr><td>インストーラが「ライトプロテクト状態にして下さい」と言う</td><td>インストールアシスタントの「書き込み禁止」を「する」にします。INI で始めたときは <code>FloppyWriteProtect=1</code>。</td></tr>
+  <tr><td>インストーラが「書き込めません」と言う</td><td>フロッピーへ書き込むインストーラです。「書き込み禁止」を「しない」にします（D88 の書き込み禁止の印が付いたイメージには書き込みません）。</td></tr>
+  <tr><td>USB フロッピーで、ログに「<code>[fd] USB-FDD C=.. H=.. R=..: 読めません（… 1785 …）</code>」</td><td>Windows のドライバが読めないセクタ（多くはプロテクトのためのもの）です。読み直しても読めないときは USB フロッピーでは扱えません。Greaseweazle で読むか、プロテクトまで記録したイメージを使ってください。</td></tr>
+  <tr><td>USB フロッピーのドライブを開けない</td><td>PC98PLAYER を「管理者として実行」すると開ける場合があります。1.25MB のディスクは 3 モード対応のドライブでないと読めません。</td></tr>
+  <tr><td>ディスクを入れ替えたのに前の中身のまま</td><td>F11 の画面の <kbd>F</kbd> のメニューで「読み直す」を選びます（インストールアシスタントでは自動で気づきます）。</td></tr>
+</table>
+</div>
+
+<h2 id="assistant">4-8. インストールアシスタント</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>症状</th><th>対処</th></tr>
+  <tr><td>思っていないフォルダへ展開・インストールされる</td><td>展開先・インストール先は作業フォルダー（カレントフォルダ）です。作業フォルダーを指定したショートカットから始めてください（<a href="ch2.html#where">第二章 2-3</a>）。</td></tr>
+  <tr><td>インストーラのメニューに「ハードディスクへインストール」が出ない</td><td>ハードディスクのドライブ名とカレントの組み合わせを変えて試します。インストーラによってはフロッピーを A: にする必要があります。</td></tr>
+  <tr><td>インストーラが「インストール先がありません」「ドライブが違います」と言う</td><td>引数（<code>B:</code> など）とハードディスクのドライブ名が合っているか、右上の中身（BAT）で確かめます。</td></tr>
+  <tr><td>インストールは終わったがゲームが始まらない</td><td>選んだ起動ファイルが違うかもしれません。インストール先の <code>PC98PLAYER.INI</code> の <code>Start=</code> を書き直します。インストーラが書いた設定ファイルがドライブ名を前提にしているときは、<code>Drive=</code> をインストールのときと同じにします（アシスタントが作った INI には書いてあります）。</td></tr>
+  <tr><td>2 枚目以降のディスクを求められたが入れ替え方がわからない</td><td><kbd>F11</kbd> を押して、下の「フロッピー」の欄で <kbd>N</kbd>（次のディスク）を押します（<a href="ch3.html#swap">第三章 3-5</a>）。</td></tr>
+  <tr><td>HDI の展開で、飛ばしたファイルがあると言われた</td><td>展開先に同じ名前のファイルが既にありました（上書きはしません）。やり直すときは展開先を空にします。</td></tr>
+</table>
+</div>
+
+<h2 id="security">4-9. セキュリティソフトの警告</h2>
+<p>PC98PLAYER.EXE には電子署名がないため、Windows Defender などが「<code>Trojan:Script/Wacatac.H!ml</code>」のような名前で警告することがあります。
+末尾の <code>!ml</code> は、既知のウイルスと一致したのではなく、機械学習による「怪しそう」という推定であることを示します。</p>
+<ul>
+  <li>PC98PLAYER はネットワークへの接続、ほかのプログラムへの干渉、キー入力の記録などは行いません。書き込むのは、ゲームのフォルダの中（ゲーム自身のセーブ、INI、ステートセーブ、ログ）と、インストールアシスタントで展開・インストールするフォルダ、フロッピーのイメージ（ゲームが書き込んだとき）だけです。</li>
+  <li>配布元以外から入手した EXE は使わないでください。</li>
+  <li>誤検知と判断される場合は、Microsoft の提出窓口（https://www.microsoft.com/wdsi/filesubmission）へ「誤検知」として報告できます。</li>
+  <li>同梱のソースコードから Visual Studio でビルドした EXE を使う方法もあります。</li>
+</ul>
+
+<h2 id="trace">4-10. トレース（記録）の取り方</h2>
+<ol class="steps">
+  <li><code>PC98PLAYER.INI</code> に次の 2 行を加えます。
+<pre>Trace=1
+ExitOnEnd=0</pre></li>
+  <li>PC98PLAYER を起動し、不具合が起きるところまで進めます。</li>
+  <li>終了すると、ゲームのフォルダに <code>PC98PLAYER.LOG</code> ができています（テキストファイル、UTF-8）。</li>
+  <li>調べ終わったら <code>Trace=0</code> に戻してください（記録中は少し重くなり、ログも大きくなります）。</li>
+</ol>
+<h3>ログに書かれる主な内容</h3>
+<div class="tablewrap">
+<table>
+  <tr><th>行の頭</th><th>意味</th></tr>
+  <tr><td><code>[dos] 起動 …</code></td><td>起動したプログラム名と、残りのメモリ量。</td></tr>
+  <tr><td><code>[dos] 常駐終了 …</code></td><td>サウンドドライバなどがメモリに常駐した記録。</td></tr>
+  <tr><td><code>[dos] open …</code></td><td>ゲームが開こうとしたファイル。</td></tr>
+  <tr><td><code>[dos] AH=xx -&gt; error nn</code></td><td>DOS の機能がエラーを返した記録。正常な動作でも出ることがあります。</td></tr>
+  <tr><td><code>[dos] INT 21h AH=xxh 未対応</code></td><td>PC98PLAYER がまだ対応していない DOS の機能をゲームが使った記録。<strong>重要な手掛かり</strong>です。</td></tr>
+  <tr><td><code>[fd] …</code></td><td>フロッピーの読み書き（INT 1Bh）と結果、本物のドライブの状態。</td></tr>
+  <tr><td><code>[fdchk] …</code></td><td>ディスクをセクタ単位で読んだ（INT 1Bh・INT 25h）後に、ゲームが「読んだ内容」「結果コード」「READ ID の値」を<strong>どの命令で何と比べたか</strong>。プロテクトの確認を調べる手がかりです（下の「プロテクトの確認を調べる」）。</td></tr>
+  <tr><td><code>[io] in / out …</code></td><td>対応していない周辺機器（I/O ポート）への読み書き。</td></tr>
+  <tr><td><code>[cpu] 未定義命令 …</code></td><td>CPU が実行できない命令に出会った記録。多くの場合、その直前でメモリの内容が壊れています。</td></tr>
+  <tr><td><code>[shell] 見つかりません …</code></td><td>バッチファイルが実行しようとしたプログラムが見つからなかった記録。</td></tr>
+</table>
+</div>
+<h3 id="fdchk">プロテクトの確認を調べる（[fdchk] の行）</h3>
+<p>ふつうのゲームはファイルを読むだけで、ディスクをセクタ単位で直接読むことはほとんどありません。
+直接読んでいるのは、たいていキーディスク（プロテクト）の確認です。<code>Trace=1</code> のとき、PC98PLAYER はセクタを読んだ直後から、
+ゲームがその結果を何と比べたかを記録します。</p>
+<pre>[fd] INT1B AH=56 AL=90 C=00 H=00 R=01 N=03 BX=0400
+[fdchk] ↓ここから、読んだ 1024 バイト（[033D0]〜）と結果 AH を比べる命令を記録
+[fdchk] 0328:0116 CMP AH=00h（INT1B AH=56h の結果） と 00h（8 ビット）→ 等しい
+[fdchk] 0328:011E CMP AL=4Eh（読んだデータ+003h） と 4Eh（8 ビット）→ 等しい
+[fdchk] 0328:0129 REPE CMPS [033D3]（読んだデータ） と [033CC] を 4 単位比べた: 4E/4E 45/45 43/43 20/20 → 最後は等しい
+[fdchk] 0328:0131 TEST [033E5]=FEh（読んだデータ+015h） と F0h（8 ビット）→ どれかのビットが立っている（非 0）
+[fd] INT1B AH=4A AL=90 C=00 H=00 R=01 N=00 BX=0400
+[fdchk] 0328:0141 CMP DL=01h（READ ID の R） と 01h（8 ビット）→ 等しい</pre>
+<ul>
+  <li><strong>記録するもの:</strong> CMP・TEST・CMPS・SCAS のうち、比べる値の一方が「読んだデータ」「INT 1Bh / INT 25h の結果（AH など）」「READ ID で読めた C・H・R・N」であるもの。
+    読んだデータを MOV や LODS でレジスタに入れてから比べた場合も、どのバイトから来た値かを示します（<code>AL=4Eh（読んだデータ+003h）</code>）。
+    読んだデータを MOVS で別の場所へ写した場合は、写し先も見張ります。</li>
+  <li><strong>行の読み方:</strong> 先頭の <code>0328:011E</code> が比べた命令の場所（CS:IP）です。「読んだデータ+003h」は、読み込んだバッファの先頭から何バイト目か。最後に比べた結果（等しい・小さい・大きい）が付きます。</li>
+  <li><strong>使い方の例:</strong> <code>[fd] セクタが見つかりません</code> の行の後に、結果 AH を 00h や 10h と比べている行があれば、そのセクタが「読めること」を確かめています。
+    読んだデータの何バイト目を決まった値と比べていれば、そのセクタの中身を確かめています。イメージを作り直すとき、どのセクタのどこが要るかの手がかりになります。</li>
+  <li>1 回の読み込みにつき約 200 万命令の間、64 行まで記録します（ログ全体では 4000 行まで）。次の読み込みがあると、そこから記録し直します。</li>
+</ul>
+
+<h3>自分で見るときのコツ</h3>
+<ul>
+  <li><strong>最後の方の行</strong>を見ます。落ちる直前に起動していたプログラムと、直前に出たエラーが手掛かりです。</li>
+  <li><code>未対応</code> や <code>未定義命令</code> があれば、ほぼそれが原因です。</li>
+  <li><code>open</code> のあとに <code>error 2</code> が続く場合は、ファイルが見つかっていません。インストール漏れやファイル名の違いを確認してください。</li>
+</ul>
+
+<h2 id="report">4-11. 不具合を報告するとき</h2>
+<ol class="steps">
+  <li>ゲーム名、発売元、版（CD 版・FD 版、HDD インストール版など）と、どの章の方法で用意したか（フォルダのコピー・HDI の展開・FD からのインストール）</li>
+  <li>PC98PLAYER の版（配布ファイルの日付）</li>
+  <li>使った <code>PC98PLAYER.INI</code> の中身</li>
+  <li>症状（どの場面で・何をしたら・どうなったか）と、再現の手順</li>
+  <li><a href="#crash">4-2 の表</a>で試した設定と、それぞれの結果</li>
+  <li><code>Trace=1</code> で取った <code>PC98PLAYER.LOG</code></li>
+  <li>できれば、不具合が起きる直前のステートセーブ（<code>PC98PLAYER.SAV\SLOTn.P98S</code>）</li>
+</ol>
+<div class="warn"><strong>お願い:</strong> ゲームのファイルやイメージそのものは、著作権のため公開の場に載せないでください。ログとステートセーブのファイルだけで調査できることも多いです。</div>
+
+<h2 id="limits">4-12. 対応していないもの</h2>
+<ul>
+  <li>N88-BASIC(86)（本体の ROM）で動くソフト。「このソフトをプレイするにはPC98実機またはそのROMデータを搭載した仮想マシンが必要です」と出たものはこれです（<a href="ch3.html#boot">第三章 3-11</a>）</li>
+  <li>FDC を直接操作するプロテクトやローダー（INT 1Bh を使わないもの）</li>
+  <li>ハードディスクイメージをそのまま開いて動かすこと（<a href="ch2.html">第二章</a>のとおりフォルダへ展開します）</li>
+  <li>2 台以上のフロッピードライブを同時に使うこと（入れられるのは 1 枚。入れ替えは F11 の画面で）</li>
+  <li>DOS エクステンダ（プロテクトモード）を使うゲーム、Windows 3.1 用のソフト</li>
+  <li>256 色表示（PC-9821 の PEGC）、31kHz 表示、N88-BASIC</li>
+  <li>ROM のグラフィック LIO（INT A0h-AFh）のうち、円（GCIRCLE）・塗りつぶし（GPAINT）・漢字（GPUT2）・スクロール（GROLL）。呼ばれても止まらずに「正常終了」を返しますが、描きません（点・線・箱・GGET/GPUT1 は描きます）</li>
+  <li>サウンド BIOS（INT D2h）の MML 演奏などの機能。<code>SoundBIOS=1</code> で使えるのは、レジスタ書き込み・発音・音色・音量だけです（MIDI プレーヤーの MIMPI の FM 演奏で使う分）</li>
+  <li>ADPCM（スピークボード・ちびおと等）、MIDI のインテリジェントモードのうちボード側でトラックを演奏する機能</li>
+  <li>CONFIG.SYS に書かれたデバイスドライバの読み込み（EMS・XMS・マウスは PC98PLAYER 側で用意します）</li>
+</ul>
+
+<h2 id="faq">4-13. よくある質問</h2>
+<h3>フロッピー版しか持っていません。</h3>
+<p>イメージ（FDI・D88 など）を <code>PC98PLAYER.EXE</code> にまとめてドロップするか、本物のディスクを入れたドライブをドロップして、インストールアシスタントでインストールしてください（<a href="ch3.html">第三章</a>）。</p>
+<h3>ゲームのセーブデータはどこに保存されますか。</h3>
+<p>ゲームのフォルダの中に、実機と同じファイル名で保存されます。ステートセーブは別に <code>PC98PLAYER.SAV</code> フォルダへ保存されます。</p>
+<h3>1 つの PC98PLAYER.EXE で複数のゲームを遊べますか。</h3>
+<p>はい。ショートカットの「作業フォルダー」にゲームのフォルダを指定するだけです（<a href="ch1.html#shared">第一章 1-5</a>）。</p>
+<h3>ゲーム中にメニューやステートセーブの画面が開きません。</h3>
+<p>マウスを捕まえている間も <kbd>F11</kbd> / <kbd>Shift</kbd>+<kbd>F11</kbd> は使えます。全画面の場合は <kbd>Alt</kbd>+<kbd>Enter</kbd> で窓に戻してからお試しください。</p>
+<h3>通常メモリはどれくらい空いていますか。</h3>
+<p>起動した直後でおよそ 627KB です。「メモリが足りません」と言われるときは <code>FirstMCB=</code> を試してください。</p>
+
+<div class="pager">
+  <a class="prev" href="ch3.html"><small>← 前へ</small>第三章 FDI イメージの利用</a>
+  <a class="next" href="ch5.html"><small>次へ →</small>第五章 メモリエディタ</a>
+</div>
+
+<footer>
+  PC98PLAYER は MIT ライセンスのソフトウェアです。ゲーム・ROM・フォントは同梱していません。FM 音源の合成には ymfm（BSD 3-Clause, Aaron Giles）を使用しています。<br>
+  PC-9801 は日本電気株式会社の商標です。記載のゲーム名は各社の商標または登録商標です。
+</footer>
+</div>
+</body>
+</html>

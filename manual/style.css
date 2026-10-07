@@ -1,0 +1,106 @@
+/* PC98PLAYER 取扱説明書（章ごとの HTML で共通） */
+:root {
+  --bg: #fbfaf7; --fg: #22211f; --muted: #6b6760; --line: #e3dfd6;
+  --card: #ffffff; --accent: #2f5d8a; --accent-bg: #eaf1f8;
+  --warn: #8a5a12; --warn-bg: #fbf1de; --code-bg: #f2efe8;
+  --ok: #2d6a3a; --ok-bg: #e7f3e9;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1c1e; --fg: #e8e6e1; --muted: #a29d94; --line: #34363a;
+    --card: #232427; --accent: #8fb8e0; --accent-bg: #22303d;
+    --warn: #e7bd73; --warn-bg: #3a2f1c; --code-bg: #2b2c30;
+    --ok: #9ad3a6; --ok-bg: #1f3325;
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: "Yu Gothic UI", "Hiragino Sans", "Meiryo", system-ui, sans-serif;
+  font-size: 15.5px; line-height: 1.8;
+}
+.wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 80px; }
+
+/* 上の帯（章の切り替え） */
+.topbar { position: sticky; top: 0; z-index: 10; background: var(--card); border-bottom: 1px solid var(--line); }
+.topbar .in { max-width: 940px; margin: 0 auto; padding: 8px 20px; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.topbar .brand { font-weight: 700; margin-right: 8px; color: var(--fg); text-decoration: none; }
+.topbar a.ch { color: var(--accent); text-decoration: none; font-size: .92em; padding: 2px 8px; border-radius: 6px; }
+.topbar a.ch:hover { background: var(--accent-bg); }
+.topbar a.ch.cur { background: var(--accent); color: var(--card); }
+
+header.page { padding: 28px 0 8px; }
+header.page .kicker { color: var(--muted); font-size: .9em; letter-spacing: .08em; }
+header.page h1 { font-size: 1.9rem; margin: 2px 0 6px; letter-spacing: .02em; }
+header.page p.lead { color: var(--muted); margin: 0 0 12px; }
+
+nav.toc { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 20px; margin: 16px 0 28px; }
+nav.toc strong { display: block; margin-bottom: 2px; }
+nav.toc ol { margin: 0; padding-left: 1.6em; columns: 2; column-gap: 32px; }
+nav.toc a { color: var(--accent); text-decoration: none; }
+nav.toc a:hover { text-decoration: underline; }
+
+h2 { font-size: 1.35rem; margin: 44px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--line); scroll-margin-top: 60px; }
+h3 { font-size: 1.08rem; margin: 26px 0 8px; scroll-margin-top: 60px; }
+p { margin: 8px 0; }
+a { color: var(--accent); }
+code, kbd, pre { font-family: "Cascadia Mono", "BIZ UDGothic", Consolas, monospace; font-size: .92em; }
+code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; }
+kbd { border: 1px solid var(--line); border-bottom-width: 2px; background: var(--card); padding: 0 6px; border-radius: 4px; white-space: nowrap; }
+pre { background: var(--code-bg); padding: 12px 16px; border-radius: 8px; overflow-x: auto; line-height: 1.6; margin: 10px 0; }
+table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; background: var(--card); font-size: .94em; }
+th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { background: var(--accent-bg); font-weight: 600; white-space: nowrap; }
+td:first-child code { white-space: nowrap; }
+.tablewrap { overflow-x: auto; }
+.note, .warn, .tip { border-radius: 8px; padding: 10px 14px; margin: 12px 0; }
+.note { background: var(--accent-bg); }
+.tip { background: var(--ok-bg); }
+.tip strong { color: var(--ok); }
+.warn { background: var(--warn-bg); }
+.warn strong { color: var(--warn); }
+ol.steps > li { margin-bottom: 8px; }
+
+/* 図 */
+figure { margin: 14px 0 20px; }
+figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: #000; image-rendering: auto; }
+figure img.pixel { image-rendering: pixelated; }
+.figrow { display: flex; flex-wrap: wrap; gap: 14px; }
+.figrow figure { flex: 1 1 300px; margin: 0 0 6px; }
+figure figcaption { color: var(--muted); font-size: .9em; margin-top: 6px; }
+
+/* 手順の流れ（横並びの箱） */
+.flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 14px 0 18px; }
+.flow .step { flex: 1 1 160px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.flow .step b { display: block; color: var(--accent); font-size: .85em; letter-spacing: .05em; }
+.flow .arrow { align-self: center; color: var(--muted); font-size: 1.3em; }
+
+/* 目次ページの章カード */
+.cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin: 18px 0; }
+.card { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; color: var(--fg); text-decoration: none; }
+.card:hover { border-color: var(--accent); }
+.card .no { color: var(--accent); font-weight: 700; font-size: .9em; }
+.card h3 { margin: 2px 0 6px; }
+.card p { margin: 0; color: var(--muted); font-size: .93em; }
+
+.pager { display: flex; justify-content: space-between; gap: 12px; margin-top: 50px; }
+.pager a { flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; text-decoration: none; color: var(--fg); }
+.pager a:hover { border-color: var(--accent); }
+.pager a small { display: block; color: var(--muted); }
+.pager a.next { text-align: right; }
+
+footer { margin-top: 40px; color: var(--muted); font-size: .86em; border-top: 1px solid var(--line); padding-top: 14px; }
+
+@media (max-width: 640px) {
+  nav.toc ol { columns: 1; }
+  .cards { grid-template-columns: 1fr; }
+  header.page h1 { font-size: 1.5rem; }
+  .flow .arrow { display: none; }
+}
+@media print {
+  .topbar, nav.toc, .pager { display: none; }
+  body { background: #fff; color: #000; }
+  h2 { page-break-after: avoid; }
+  figure { page-break-inside: avoid; }
+}

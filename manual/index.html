@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC98PLAYER 取扱説明書</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="in">
+  <a class="brand" href="index.html">PC98PLAYER</a>
+  <a class="ch cur" href="index.html">目次</a>
+  <a class="ch" href="ch1.html">第一章 基本的な使い方</a>
+  <a class="ch" href="ch2.html">第二章 HDI イメージ</a>
+  <a class="ch" href="ch3.html">第三章 FDI イメージ</a>
+  <a class="ch" href="ch4.html">第四章 トラブルシューティング</a>
+  <a class="ch" href="ch5.html">第五章 メモリエディタ</a>
+</div></div>
+
+<div class="wrap">
+<header class="page">
+  <div class="kicker">取扱説明書</div>
+  <h1>PC98PLAYER</h1>
+  <p class="lead">PC-9801 のゲームを、Windows の上でそのまま遊ぶための小さな仮想 PC-98 です。</p>
+</header>
+
+<h2 id="about">PC98PLAYER とは</h2>
+<p>PC98PLAYER は、PC-9801 の本体・BIOS・MS-DOS の働きを自前で用意した小さな仮想 PC-98 です。
+実機の ROM や MS-DOS 本体は必要ありません。ハードディスクにインストールした状態のゲームのフォルダに
+<code>PC98PLAYER.EXE</code> を置くだけで動きます。</p>
+<ul>
+  <li>画面: テキスト画面・16 色グラフィック・GRCG・EGC・200 ライン表示</li>
+  <li>音: FM 音源（PC-9801-86 / 26K 相当）、86 ボードの PCM、ビープ、MIDI（任意）</li>
+  <li>文字: 漢字 ROM の代わりに、Windows の MS ゴシックから字形を作ります（外字にも対応）</li>
+  <li>入力: キーボード、マウス（バスマウス／マウスドライバ相当）、ゲームパッド（音源ボードのジョイスティック端子として。ボタンにキーも割り当て可）</li>
+  <li>いつでも保存・再開できるステートセーブ</li>
+  <li>ゲームの用意を手伝う<strong>インストールアシスタント</strong></li>
+</ul>
+<p>動作環境: Windows 10 / 11（64bit）。</p>
+
+<h2 id="chapters">どの章を読めばいいか</h2>
+<p>手元にあるゲームの形によって、読む章が変わります。</p>
+<div class="cards">
+  <a class="card" href="ch1.html">
+    <div class="no">第一章</div>
+    <h3>基本的な使い方</h3>
+    <p>ハードディスクにインストール済みのゲームのフォルダがある。フォルダに PC98PLAYER.EXE を入れて起動する、いちばん基本の遊び方（フリーソフト Super Depth で実際に遊んでみるチュートリアル）と、設定（INI）の一覧。</p>
+  </a>
+  <a class="card" href="ch2.html">
+    <div class="no">第二章</div>
+    <h3>HDI イメージの利用</h3>
+    <p>ゲームがハードディスクイメージ（HDI・NHD・THD）で手元にある。インストールアシスタントで中身をフォルダへ展開し、INI を作って遊ぶ。</p>
+  </a>
+  <a class="card" href="ch3.html">
+    <div class="no">第三章</div>
+    <h3>FDI イメージの利用</h3>
+    <p>フロッピーのイメージ（FDI・D88・NFD など）や本物のフロッピーディスクしかない。インストールアシスタントでインストーラを動かし、フォルダへインストールする。MS-DOS を使わずフロッピーから直接起動する初期のゲームも、ここで。</p>
+  </a>
+  <a class="card" href="ch4.html">
+    <div class="no">第四章</div>
+    <h3>トラブルシューティング集</h3>
+    <p>すぐ閉じる・落ちる・音が出ない・キーディスクを求められる・インストールがうまくいかない、などの症状別の対処と、不具合の報告のしかた。</p>
+  </a>
+  <a class="card" href="ch5.html">
+    <div class="no">第五章</div>
+    <h3>メモリエディタ</h3>
+    <p>ゲームのメモリを見て直接書き換える別窓。値の変化で番地を絞り込むサーチ、コマンドでの書き込み、書き込みをまとめて実行するコードエディタ付き（上級者向け）。</p>
+  </a>
+</div>
+
+<h2 id="assistant">インストールアシスタント</h2>
+<p>「ゲームのフォルダ」を用意するための次の 3 つの機能を、まとめて<strong>インストールアシスタント</strong>と呼びます。どれも、イメージやドライブを <code>PC98PLAYER.EXE</code> にドロップするだけで始まります。</p>
+<div class="tablewrap">
+<table>
+  <tr><th>ドロップするもの</th><th>インストールアシスタントがすること</th><th>説明</th></tr>
+  <tr><td>ハードディスクイメージ（.HDI など）</td><td>中身をフォルダへ展開し、起動するファイルを選んで INI を作る</td><td style="white-space:nowrap"><a href="ch2.html">第二章</a></td></tr>
+  <tr><td>フロッピーイメージ（.FDI・.D88 など。何枚でも）</td><td>イメージをまとめてセットし、インストーラを動かす</td><td style="white-space:nowrap"><a href="ch3.html#assistant">第三章</a></td></tr>
+  <tr><td>フロッピードライブ（USB フロッピーの A:\ など）</td><td>本物のディスクからインストーラを動かす（ディスクの入れ替えは実物で）</td><td style="white-space:nowrap"><a href="ch3.html#realdrive">第三章</a></td></tr>
+</table>
+</div>
+
+<h2 id="keys">よく使うキー</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>キー</th><th>はたらき</th></tr>
+  <tr><td><kbd>Shift</kbd>+<kbd>F11</kbd> / <kbd>F11</kbd></td><td>ステートセーブ／ステートロード（フロッピーの入れ替えもこの画面）</td></tr>
+  <tr><td>ウインドウをクリック / <kbd>F12</kbd></td><td>マウスを捕まえる / 放す</td></tr>
+  <tr><td><kbd>Shift</kbd>+<kbd>F12</kbd>（押している間）</td><td>早送り</td></tr>
+  <tr><td><kbd>Alt</kbd>+<kbd>Enter</kbd></td><td>全画面表示の切り替え</td></tr>
+  <tr><td><kbd>F11</kbd> → <kbd>R</kbd></td><td>INI を読み直してプログラム再起動（INI の動作確認に）</td></tr>
+  <tr><td><kbd>F11</kbd> → <kbd>S</kbd></td><td>画面＆サウンド設定（音源・MIDI・音量・画面を画面で直して INI に保存）</td></tr>
+</table>
+</div>
+<p>キーの一覧は<a href="ch1.html#keys">第一章の「操作方法」</a>にあります。</p>
+
+<footer>
+  PC98PLAYER は MIT ライセンスのソフトウェアです。ゲーム・ROM・フォントは同梱していません。FM 音源の合成には ymfm（BSD 3-Clause, Aaron Giles）を使用しています。<br>
+  PC-9801 は日本電気株式会社の商標です。記載のゲーム名は各社の商標または登録商標です。
+</footer>
+</div>
+</body>
+</html>

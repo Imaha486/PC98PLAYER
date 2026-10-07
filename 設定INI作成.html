@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC98PLAYER 設定INI作成</title>
+<!--
+  PC98PLAYER.INI を作るページ（ブラウザで開くだけで使える 1 ファイル。ネットにはつながない）。
+  項目はすべて下の SCHEMA に並べてある。INI の項目を増やしたり既定値を変えたりしたら、ここも直すこと。
+  （core/player.cpp・win32/main.cpp・win32/gamepad.inc が読む項目と、マニュアル第一章の一覧に合わせる）
+-->
+<style>
+:root {
+  --bg: #f4f2ee; --card: #ffffff; --fg: #1f2328; --muted: #5d636b; --line: #d9d5cc;
+  --accent: #1f6f78; --accent-weak: #e2f0f1; --warn: #9a5b00; --code-bg: #1e2227; --code-fg: #e8e6e3;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16181b; --card: #1f2226; --fg: #e6e4e0; --muted: #9aa0a6; --line: #34383e;
+          --accent: #5fb7c0; --accent-weak: #1d3336; --warn: #e0a24a; --code-bg: #0f1113; --code-fg: #e8e6e3; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font-family: "Yu Gothic UI", "Meiryo", "Hiragino Sans", system-ui, sans-serif; line-height: 1.6; }
+.wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 60px; }
+header h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: .02em; }
+header p { margin: 0; color: var(--muted); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 8px; align-items: center; }
+button, .btn { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+button:hover, .btn:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; padding: 9px 22px; }
+section.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); margin: 16px 0; }
+section.card > h2 { margin: 0; font-size: 1.05rem; padding: 12px 16px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: baseline; gap: 10px; }
+section.card > h2 small { color: var(--muted); font-weight: normal; font-size: .85rem; }
+.items { padding: 4px 16px 10px; }
+.item { display: grid; grid-template-columns: 220px 1fr; gap: 4px 16px; padding: 10px 0; border-bottom: 1px dashed var(--line); }
+.item:last-child { border-bottom: none; }
+.item .label { font-weight: 600; }
+.item .label code { display: block; font-weight: normal; color: var(--muted); font-size: .8rem; }
+.item .help { grid-column: 2; color: var(--muted); font-size: .86rem; }
+.item.changed .label { color: var(--accent); }
+.item.changed .label { border-left: 3px solid var(--accent); padding-left: 8px; margin-left: -11px; }
+input[type=text], input[type=number], select { font: inherit; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+input[type=text] { width: 100%; max-width: 420px; }
+input[type=number] { width: 120px; }
+.row { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.radio label, .checks label { display: inline-flex; align-items: center; gap: 4px; margin-right: 6px; cursor: pointer; }
+.drop { border: 2px dashed var(--line); border-radius: 8px; padding: 10px 12px; width: 100%; max-width: 560px; }
+.drop.over { border-color: var(--accent); background: var(--accent-weak); }
+.drop .hint { color: var(--muted); font-size: .85rem; }
+.cands { margin-top: 6px; }
+.cands select { max-width: 100%; }
+.unit { color: var(--muted); font-size: .85rem; }
+#out { width: 100%; min-height: 280px; font-family: Consolas, "MS Gothic", monospace; font-size: .92rem;
+  background: var(--code-bg); color: var(--code-fg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; resize: vertical; }
+.outbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; }
+.note { color: var(--muted); font-size: .85rem; }
+.warn { color: var(--warn); font-size: .88rem; }
+.opts label { margin-right: 14px; }
+@media (max-width: 640px) {
+  .item { grid-template-columns: 1fr; }
+  .item .help { grid-column: 1; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>PC98PLAYER 設定INI作成</h1>
+  <p>項目を選ぶと、いちばん下に <code>PC98PLAYER.INI</code> の中身ができあがります。［ダウンロード］で保存して、ゲームのフォルダ（PC98PLAYER.EXE と同じ場所）に置いてください。</p>
+</header>
+
+<div class="toolbar">
+  <label class="btn">今ある INI を読み込む<input type="file" id="importIni" accept=".ini,.INI,.txt" hidden></label>
+  <button type="button" id="resetAll">すべて既定値に戻す</button>
+  <span class="note">読み込んだ INI の、このページに無い項目はそのまま残します。</span>
+</div>
+
+<div id="form"></div>
+
+<section class="card">
+  <h2>できあがった PC98PLAYER.INI</h2>
+  <div class="items">
+    <div class="opts">
+      <label><input type="checkbox" id="optAll"> 既定値のままの項目も書き出す</label>
+      <label><input type="checkbox" id="optComment" checked> 説明のコメントを付ける</label>
+    </div>
+    <textarea id="out" spellcheck="false"></textarea>
+    <p class="note" id="editNote">この欄は手で書き直せます。ただし上の項目を変えると、作り直されて手で直した分は消えます。</p>
+    <div class="outbar">
+      <button type="button" class="primary" id="download">ダウンロード</button>
+      <button type="button" id="copy">コピー</button>
+      <span class="note" id="status"></span>
+    </div>
+  </div>
+</section>
+</div>
+
+<script>
+"use strict";
+// ---- 項目の一覧 --------------------------------------------------------------------
+// type: file（ファイル選択・ドラッグ＆ドロップ）/ text / number / check（チェックで on の値、外すと off の値）/
+//       radio / select / drive（A〜Z）/ multi（チェックを + でつなぐ）
+const DRIVES = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const FD_EXT = ".d88,.d98,.88d,.98d,.fdi,.hdm,.tfd,.nfd,.xdf,.dup,.2hd,.fdd,.img,.ima,.scp,.hfe";
+const SCHEMA = [
+  { title: "起動するもの", note: "いちばん大事な項目です", items: [
+    { key: "Start", label: "最初に実行するプログラム", type: "file", def: "", always: true, accept: ".exe,.com,.bat",
+      folder: true, exts: ["EXE", "COM", "BAT"],
+      help: "ゲームのフォルダの中の EXE・COM・BAT。サブフォルダのものは GAME\\GAME.EXE のように書きます（そのフォルダをカレントにして実行）。「フォルダを選ぶ」でゲームのフォルダを選ぶと、中のプログラムから選べます。" },
+    { key: "Args", label: "引数", type: "text", def: "", placeholder: "例: /I5 CANYON.MID", help: "Start= のプログラムに渡す引数。" },
+    { key: "Title", label: "ウインドウのタイトル", type: "text", def: "", placeholder: "空ならフォルダ名", help: "ウインドウの上に出る名前。" },
+    { key: "ExitOnEnd", label: "終わったら窓を閉じる", type: "check", def: "1", on: "1", off: "0", text: "ゲームが終わったら窓を閉じる",
+      help: "外すと最後の画面を残します（エラーメッセージの確認に便利）。" },
+  ]},
+  { title: "ドライブ", items: [
+    { key: "Drive", label: "ゲームのフォルダのドライブ", type: "drive", def: "A", help: "ゲームのフォルダを何ドライブとして見せるか。" },
+    { key: "CurrentDrive", label: "起動したときのカレントドライブ", type: "drive", def: "", none: "指定しない", help: "指定しなければ Start= に付けたドライブ（無ければゲームのドライブ）。フロッピーのインストーラが「カレントドライブ」にインストールする場合（Start=B:\\INSTALL.EXE など）は、ゲームのフォルダのドライブ（A）にします。" },
+    { key: "CurrentDirectory", label: "起動したときのカレントディレクトリ", type: "text", def: "", placeholder: "例: A:\\NANPA\\", help: "「A:\\NANPA を作ってそこから実行して下さい」というインストーラ向け。ドライブを付けるとカレントドライブも兼ねます。ゲームのドライブに無いフォルダは起動時に作ります。" },
+    { key: "Root", label: "ゲームのフォルダ", type: "text", def: "", placeholder: "空なら INI のあるフォルダ", help: "INI と別の場所にゲームがあるとき（INI からの相対パス可）。" },
+    { key: "FreeSpaceMB", label: "空き容量", type: "number", def: "96", min: 1, max: 1000, unit: "MB", help: "大きすぎると「空きが足りない」と言うソフトがあります。" },
+  ]},
+  { title: "画面", items: [
+    { key: "Scale", label: "表示倍率", type: "radio", def: "2", options: [["1","x1"],["2","x2"],["3","x3"],["4","x4"],["5","x5"],["6","x6"]], help: "x1 で 640×400。" },
+    { key: "FullScreen", label: "フルスクリーン", type: "check", def: "0", on: "1", off: "0", text: "フルスクリーンを有効にする", help: "起動したときから全画面。" },
+    { key: "Smooth", label: "なめらかに拡大", type: "check", def: "0", on: "1", off: "0", text: "拡大をなめらかにする", help: "外すとドットのまま。" },
+    { key: "Font", label: "漢字のフォント", type: "text", def: "ＭＳ ゴシック", help: "漢字の字形を作るもとにする Windows のフォント。" },
+    { key: "FontShift", label: "半角の左端を空ける", type: "check", def: "1", on: "1", off: "0", text: "実機の ROM と同じく左端の列を空ける",
+      help: "半角を太字にして描くソフト（MIMPI V4 の曲名など）で線が点線のように崩れるのを防ぎます。" },
+    { key: "KanjiJIS", label: "漢字の並び", type: "radio", def: "78", options: [["78","旧 JIS（PC-98 と同じ）"],["83","新 JIS"]] },
+  ]},
+  { title: "CPU・メモリ・DOS", items: [
+    { key: "CpuMHz", label: "CPU の速さ", type: "number", def: "16", min: 1, max: 1000, unit: "MHz 相当", help: "i486DX2 推奨のソフトは 100〜133 くらいが目安。上げるほどパソコンの負荷が増えます。" },
+    { key: "IdleSkip", label: "待ちの空回りを飛ばす", type: "check", def: "1", on: "1", off: "0", text: "割込み待ちの間は命令を実行せずに待つ", help: "おかしな動きをするときの確認用に外せます。" },
+    { key: "MemoryKB", label: "通常メモリ", type: "number", def: "640", min: 128, max: 640, unit: "KB" },
+    { key: "EMS", label: "EMS", type: "check", def: "1", on: "1", off: "0", text: "EMS（EMM386 相当）を用意する" },
+    { key: "EMSKB", label: "EMS の容量", type: "number", def: "4096", min: 0, max: 32768, unit: "KB" },
+    { key: "XMS", label: "XMS", type: "check", def: "1", on: "1", off: "0", text: "XMS（HIMEM.SYS 相当）を用意する" },
+    { key: "XMSKB", label: "XMS の容量", type: "number", def: "8192", min: 0, max: 65536, unit: "KB" },
+    { key: "FirstMCB", label: "空きメモリの始まり", type: "text", def: "", placeholder: "例: 0200（16 進）", help: "一部のゲームはこの位置によって動いたり落ちたりします（第四章）。" },
+    { key: "DOSVersion", label: "MS-DOS の版", type: "select", def: "5.00", options: [["5.00","5.00"],["3.30","3.30"],["3.10","3.10"],["6.20","6.20"]], help: "「DOS のバージョンが違います」と出るときに。" },
+    { key: "FakeYear", label: "見せる年", type: "text", def: "", placeholder: "例: 1998", help: "年だけを置き換えます（2000 年問題対策）。" },
+    { key: "FakeDate", label: "見せる日付", type: "text", def: "", placeholder: "例: 1999/12/31", help: "起動した日をこの日付として見せます（見せる年より優先）。" },
+  ]},
+  { title: "フロッピー", note: "イメージはゲームのフォルダに置いてください", items: [
+    { key: "FloppyDisk", label: "フロッピー 1 台目", type: "file", def: "", accept: FD_EXT,
+      help: "起動時に入れておくディスクイメージ（D88・FDI・NFD など）。実機のドライブなら FDD:A、Greaseweazle なら GW と書きます。" },
+    { key: "FloppyDrive", label: "1 台目のドライブ", type: "drive", def: "B", help: "ゲームのドライブと同じ文字なら次の文字にずらします。" },
+    { key: "FloppyDisk2", label: "フロッピー 2 台目", type: "file", def: "", accept: FD_EXT, help: "2 台のドライブを使うソフト向け。" },
+    { key: "FloppyDrive2", label: "2 台目のドライブ", type: "drive", def: "", none: "1 台目の次", help: "" },
+    { key: "FloppyWriteProtect", label: "書き込み禁止", type: "check", def: "0", on: "1", off: "0", text: "入れるディスクを書き込み禁止にする",
+      help: "「ライトプロテクト状態ではありません」と止まるインストーラ向け。インストーラがディスクを書き換えるのも防げます。" },
+    { key: "Boot", label: "フロッピーから起動", type: "check", def: "", on: "FD", off: "", text: "MS-DOS を使わずに 1 台目のディスクから起動する",
+      help: "PC-98 初期の独自形式のディスク向け（第三章 3-11）。" },
+    { key: "GWDrive", label: "Greaseweazle のドライブ", type: "select", def: "A", options: [["A","A"],["B","B"],["0","0（Shugart）"],["1","1（Shugart）"],["2","2（Shugart）"]] },
+    { key: "GWRevs", label: "Greaseweazle の読む回転数", type: "number", def: "3", min: 1, max: 8, unit: "回転" },
+  ]},
+  { title: "音", items: [
+    { key: "SoundBoard", label: "音源ボード", type: "select", def: "86",
+      options: [["86","PC-9801-86（FM 6 音＋SSG＋リズム＋PCM）"],["26","PC-9801-26K（FM 3 音＋SSG）"],["0","なし"]] },
+    { key: "SoundBIOS", label: "サウンド BIOS", type: "check", def: "0", on: "1", off: "0", text: "サウンド BIOS（INT D2h）を載せる",
+      help: "MIDI プレーヤーの MIMPI などが FM 音源で演奏するのに使います。音色は PC98PLAYER が用意したもので、実機の ROM とは違います。" },
+    { key: "SoundIRQ", label: "音源ボードの割込み", type: "select", def: "12", options: [["3","3"],["10","10"],["12","12"],["13","13"]] },
+    { key: "Sound", label: "FM 音源の音", type: "check", def: "1", on: "1", off: "0", text: "FM 音源の音を出す", help: "外してもボード自体はある扱いです。" },
+    { key: "Volume", label: "全体の音量", type: "number", def: "100", min: 0, max: 1000, unit: "%" },
+    { key: "FMVolume", label: "FM の音量", type: "number", def: "100", min: 0, max: 1000, unit: "%" },
+    { key: "SSGVolume", label: "SSG の音量", type: "number", def: "100", min: 0, max: 1000, unit: "%" },
+    { key: "PCMVolume", label: "86 ボードの PCM の音量", type: "number", def: "100", min: 0, max: 1000, unit: "%" },
+    { key: "BeepVolume", label: "ビープ音の音量", type: "number", def: "50", min: 0, max: 1000, unit: "%" },
+    { key: "RhythmROM", label: "リズム音源のサンプル", type: "file", def: "", accept: ".wav,.WAV",
+      help: "2608_RYM.WAV など。無くても内蔵の合成音で鳴ります。" },
+    { key: "SampleRate", label: "サンプリング周波数", type: "select", def: "44100", options: [["44100","44100 Hz"],["48000","48000 Hz"],["22050","22050 Hz"]] },
+    { key: "MIDI", label: "MIDI", type: "check", def: "0", on: "1", off: "0", text: "MIDI 音源（MPU-PC98II 相当）を載せる",
+      help: "Windows の MIDI 出力へ送ります。RS-232C に MIDI インターフェースをつなぐ設定のゲームも鳴ります。外したままだと、ゲームで MIDI を選んでも鳴りません。ゲーム中に F11 →「S: 画面＆サウンド設定」でも切り替えられます。" },
+    { key: "MidiDevice", label: "MIDI の出力先", type: "number", def: "-1", min: -1, max: 32, help: "-1 は Windows の既定。番号はゲーム中の F11 →「S: 画面＆サウンド設定」の一覧（「0: 〜」）で確かめられます。" },
+    { key: "MidiIRQ", label: "MIDI ボードの割込み", type: "number", def: "6", min: 0, max: 15 },
+    { key: "MidiSpeedFix", label: "MIDI の演奏速度", type: "number", def: "100", min: 10, max: 1000, unit: "%", help: "「MIDI のときだけ曲が遅い」ソフトで 120〜150 などに。" },
+  ]},
+  { title: "マウス・キーボード", items: [
+    { key: "MouseSpeed", label: "マウスの速さ", type: "number", def: "100", min: 1, max: 1000, unit: "%" },
+    { key: "MouseDriver", label: "マウスドライバ", type: "check", def: "1", on: "1", off: "0", text: "マウスドライバ（MOUSE.COM 相当）を用意する" },
+    { key: "MouseLockDisable", label: "マウスの捕まえ方", type: "radio", def: "0",
+      options: [["0","クリックで捕まえる"],["1","捕まえない（マウスを使わないソフト）"],["2","捕まえずに、画面の上にある間だけ送る"]] },
+    { key: "MiddleRelease", label: "中ボタンで放す", type: "check", def: "1", on: "1", off: "0", text: "中ボタン（ホイール）クリックでマウスを放す" },
+    { key: "KeyRepeat", label: "キーリピート", type: "check", def: "1", on: "1", off: "0", text: "押しっぱなしで連打を送る" },
+    { key: "PauseInactive", label: "裏では止める", type: "check", def: "0", on: "1", off: "0", text: "ほかのウインドウを操作している間ゲームを止める" },
+  ]},
+  { title: "ゲームパッド", items: [
+    { key: "Joystick", label: "ゲームパッド", type: "check", def: "1", on: "1", off: "0", text: "ゲームパッドを使う" },
+    { key: "JoyDevice", label: "使うゲームパッド", type: "number", def: "0", min: 0, max: 16, help: "0 は最初に見つかったもの、1〜16 はその番号のゲームコントローラ。" },
+    { key: "JoyDirection", label: "スティックの行き先", type: "multi", def: "JOY",
+      options: [["JOY","ジョイスティック"],["CURSOR","カーソルキー"],["TENKEY","テンキー（8・4・6・2）"]], none: "NONE" },
+    { key: "JoyDeadZone", label: "スティックの遊び", type: "number", def: "50", min: 0, max: 100, unit: "%" },
+    { key: "JoyRapid", label: "連射の速さ", type: "number", def: "4", min: 1, max: 30, unit: "フレーム", help: "小さいほど速い。" },
+    { key: "JoyButton1", label: "ボタン 1", type: "text", def: "A", help: "A / B（トリガ）、RAPIDA / RAPIDB（連射）、RETURN・SPACE・ESC・Z・F1 などのキー名、0x1C のようなキーコード。A+RETURN のように + で重ねられます。NONE で何もしない。" },
+    { key: "JoyButton2", label: "ボタン 2", type: "text", def: "B" },
+    { key: "JoyButton3", label: "ボタン 3", type: "text", def: "SPACE" },
+    { key: "JoyButton4", label: "ボタン 4", type: "text", def: "RETURN" },
+  ]},
+  { title: "調べもの", note: "ふだんは使いません", items: [
+    { key: "Trace", label: "記録", type: "check", def: "0", on: "1", off: "0", text: "PC98PLAYER.LOG を書き出す", help: "動かないときの調査用（第四章 4-10）。" },
+    { key: "MemoryEditor", label: "メモリエディタ", type: "check", def: "0", on: "1", off: "0", text: "起動と同時にメモリエディタを開く" },
+    { key: "CodeEditor", label: "コードエディタ", type: "check", def: "0", on: "1", off: "0", text: "起動と同時にコードエディタを開く" },
+  ]},
+];
+// INI の別名（読み込むときだけ）
+const ALIAS = { FLOPPYIMAGE: "FloppyDisk", FLOPPYIMAGE2: "FloppyDisk2", CPUCLOCK: "CpuMHz" };
+
+// ---- 状態 ----------------------------------------------------------------------------
+const state = {};          // key → 値（文字列）
+let extraLines = [];       // 読み込んだ INI の、このページに無い行
+const ITEMS = SCHEMA.flatMap(s => s.items);
+const BYKEY = Object.fromEntries(ITEMS.map(it => [it.key.toUpperCase(), it]));
+const $ = s => document.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+  }
+  for (const k of kids) if (k != null) e.append(k);
+  return e;
+};
+
+// ---- フォームを作る ------------------------------------------------------------------
+const setters = {};        // key → 画面へ値を反映する関数
+function build() {
+  const form = $("#form");
+  for (const sec of SCHEMA) {
+    const items = el("div", { class: "items" });
+    for (const it of sec.items) items.append(buildItem(it));
+    form.append(el("section", { class: "card" }, el("h2", {}, sec.title, sec.note ? el("small", { text: sec.note }) : null), items));
+  }
+}
+function buildItem(it) {
+  state[it.key] = it.def;
+  const wrap = el("div", { class: "item", id: "item-" + it.key });
+  wrap.append(el("div", { class: "label" }, it.label, el("code", { text: it.key + "=" })));
+  const ctl = el("div", {});
+  const set = v => { state[it.key] = v; mark(it); generate(); };
+  switch (it.type) {
+    case "text": case "number": {
+      const inp = el("input", { type: it.type, value: it.def, placeholder: it.placeholder || "" });
+      if (it.min != null) inp.min = it.min; if (it.max != null) inp.max = it.max;
+      inp.addEventListener("input", () => set(inp.value.trim()));
+      setters[it.key] = v => inp.value = v;
+      ctl.append(el("div", { class: "row" }, inp, it.unit ? el("span", { class: "unit", text: it.unit }) : null));
+      break; }
+    case "check": {
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = it.def === it.on;
+      cb.addEventListener("change", () => set(cb.checked ? it.on : it.off));
+      setters[it.key] = v => cb.checked = (String(v).toUpperCase() === String(it.on).toUpperCase());
+      ctl.append(el("label", { class: "checks" }, cb, it.text || "有効にする"));
+      break; }
+    case "radio": {
+      const box = el("div", { class: "radio row" });
+      const name = "r-" + it.key;
+      for (const [v, t] of it.options) {
+        const r = el("input", { type: "radio", name, value: v });
+        r.checked = v === it.def;
+        r.addEventListener("change", () => set(v));
+        box.append(el("label", {}, r, t));
+      }
+      setters[it.key] = v => box.querySelectorAll("input").forEach(r => r.checked = r.value === String(v));
+      ctl.append(box);
+      break; }
+    case "select": case "drive": {
+      const sel = el("select", {});
+      const opts = it.type === "drive" ? DRIVES.map(d => [d, d + ":"]) : it.options;
+      if (it.none) sel.append(el("option", { value: "", text: it.none }));
+      for (const [v, t] of opts) sel.append(el("option", { value: v, text: t }));
+      sel.value = it.def;
+      sel.addEventListener("change", () => set(sel.value));
+      setters[it.key] = v => {
+        if (![...sel.options].some(o => o.value === v)) sel.append(el("option", { value: v, text: v }));
+        sel.value = v;
+      };
+      ctl.append(sel);
+      break; }
+    case "multi": {
+      const box = el("div", { class: "checks row" });
+      const cbs = [];
+      const read = () => { const on = cbs.filter(c => c.checked).map(c => c.value); set(on.length ? on.join("+") : it.none); };
+      for (const [v, t] of it.options) {
+        const cb = el("input", { type: "checkbox", value: v });
+        cb.checked = it.def.split("+").includes(v);
+        cb.addEventListener("change", read);
+        cbs.push(cb); box.append(el("label", {}, cb, t));
+      }
+      setters[it.key] = v => { const parts = String(v).toUpperCase().split("+"); cbs.forEach(c => c.checked = parts.includes(c.value)); };
+      ctl.append(box);
+      break; }
+    case "file": {
+      const txt = el("input", { type: "text", value: it.def, placeholder: "ファイル名（ゲームのフォルダからの相対パス）" });
+      txt.addEventListener("input", () => set(txt.value.trim()));
+      const pick = el("input", { type: "file", accept: it.accept || "", hidden: "" });
+      pick.addEventListener("change", () => { if (pick.files[0]) { txt.value = pick.files[0].name; set(txt.value); } });
+      const btns = el("div", { class: "row" },
+        el("button", { type: "button", onclick: () => pick.click() }, "ファイルを選ぶ…"), pick);
+      const cands = el("div", { class: "cands" });
+      if (it.folder) {
+        const dir = el("input", { type: "file", hidden: "" });
+        dir.setAttribute("webkitdirectory", ""); dir.multiple = true;
+        dir.addEventListener("change", () => showCandidates(it, [...dir.files].map(f => f.webkitRelativePath), cands, txt, set));
+        btns.append(el("button", { type: "button", onclick: () => dir.click() }, "フォルダを選ぶ…"), dir);
+      }
+      const drop = el("div", { class: "drop" }, el("div", { class: "row" }, txt), btns,
+        el("div", { class: "hint", text: it.folder ? "ここにファイルやゲームのフォルダをドラッグ＆ドロップしても入れられます。" : "ここにファイルをドラッグ＆ドロップしても入れられます。" }), cands);
+      drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+      drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+      drop.addEventListener("drop", async e => {
+        e.preventDefault(); drop.classList.remove("over");
+        const entries = [...e.dataTransfer.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+        if (it.folder && entries.length === 1 && entries[0].isDirectory) {
+          const paths = await walk(entries[0], entries[0].name);
+          showCandidates(it, paths, cands, txt, set);
+        } else if (e.dataTransfer.files[0]) { txt.value = e.dataTransfer.files[0].name; set(txt.value); }
+      });
+      setters[it.key] = v => txt.value = v;
+      ctl.append(drop);
+      break; }
+  }
+  wrap.append(ctl);
+  if (it.help) wrap.append(el("div", { class: "help", text: it.help }));
+  return wrap;
+}
+// フォルダの中を全部たどる（ドラッグ＆ドロップのとき）
+function walk(entry, path) {
+  return new Promise(resolve => {
+    if (entry.isFile) return resolve([path]);
+    const reader = entry.createReader(), out = [];
+    const next = () => reader.readEntries(async list => {
+      if (!list.length) return resolve(out);
+      for (const e of list) out.push(...await walk(e, path + "/" + e.name));
+      next();
+    });
+    next();
+  });
+}
+// フォルダの中の実行できるものを並べる（先頭のフォルダ名＝ゲームのフォルダは外す）
+function showCandidates(it, paths, box, txt, set) {
+  box.textContent = "";
+  const exe = paths.map(p => p.split("/").slice(1).join("\\"))
+    .filter(p => p && it.exts.includes(p.split(".").pop().toUpperCase()))
+    .sort((a, b) => (a.split("\\").length - b.split("\\").length) || a.localeCompare(b));
+  if (!exe.length) { box.append(el("span", { class: "warn", text: "実行できるもの（EXE・COM・BAT）が見つかりませんでした。" })); return; }
+  const sel = el("select", {}, el("option", { value: "", text: `見つかったもの ${exe.length} 個から選ぶ…` }), ...exe.map(p => el("option", { value: p, text: p })));
+  sel.addEventListener("change", () => { if (sel.value) { txt.value = sel.value; set(sel.value); } });
+  box.append(sel);
+  // よくある名前（INSTALL 以外の BAT・EXE）を最初の候補にする
+  const guess = exe.find(p => !/INST|SETUP|CONFIG/i.test(p) && /\.BAT$/i.test(p)) || exe.find(p => !/INST|SETUP|CONFIG/i.test(p)) || exe[0];
+  if (!state[it.key]) { txt.value = guess; sel.value = guess; set(guess); }
+}
+function mark(it) {
+  const w = document.getElementById("item-" + it.key);
+  if (w) w.classList.toggle("changed", String(state[it.key]) !== String(it.def));
+}
+
+// ---- INI を作る ----------------------------------------------------------------------
+function generate() {
+  const all = $("#optAll").checked, com = $("#optComment").checked;
+  const lines = ["; PC98PLAYER.INI（PC98PLAYER 設定INI作成.html で作成）", "[PC98PLAYER]"];
+  for (const sec of SCHEMA) {
+    const rows = [];
+    for (const it of sec.items) {
+      const v = state[it.key] ?? "";
+      const changed = String(v) !== String(it.def);
+      if (!(all || changed || it.always)) continue;
+      if (!all && !it.always && v === "" ) continue;
+      if (com) rows.push("; " + it.label);
+      rows.push(it.key + "=" + v);
+    }
+    if (rows.length) { if (com) lines.push("", "; ---- " + sec.title); lines.push(...rows); }
+  }
+  if (extraLines.length) { if (com) lines.push("", "; ---- 読み込んだ INI のそのほかの項目"); lines.push(...extraLines); }
+  $("#out").value = lines.join("\r\n") + "\r\n";
+  $("#status").textContent = state.Start ? "" : "「最初に実行するプログラム」が空です。";
+}
+
+// ---- 読み込み ------------------------------------------------------------------------
+function decode(buf) {
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+  catch { return new TextDecoder("shift_jis").decode(buf); }
+}
+function loadIni(text) {
+  resetAll(false);
+  extraLines = [];
+  let sec = "";
+  for (let line of text.replace(/^﻿/, "").split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t[0] === ";" || t[0] === "#") continue;
+    if (t[0] === "[") { sec = t.replace(/[\[\]]/g, "").trim().toUpperCase(); continue; }
+    const eq = t.indexOf("=");
+    if (eq < 0 || sec !== "PC98PLAYER") continue;
+    let k = t.slice(0, eq).trim().toUpperCase(), v = t.slice(eq + 1).trim();
+    const sc = v.indexOf(" ;"); if (sc >= 0) v = v.slice(0, sc).trim();
+    if (v.length >= 2 && v[0] === '"' && v.endsWith('"')) v = v.slice(1, -1);
+    if (ALIAS[k]) k = ALIAS[k].toUpperCase();
+    const it = BYKEY[k];
+    if (!it) { extraLines.push(t.slice(0, eq).trim() + "=" + v); continue; }
+    state[it.key] = v; setters[it.key] && setters[it.key](v); mark(it);
+  }
+  generate();
+}
+function resetAll(regen = true) {
+  for (const it of ITEMS) { state[it.key] = it.def; setters[it.key] && setters[it.key](it.def); mark(it); }
+  extraLines = [];
+  document.querySelectorAll(".cands").forEach(c => c.textContent = "");
+  if (regen) generate();
+}
+
+// ---- 保存 ----------------------------------------------------------------------------
+// Shift_JIS（CP932）にする。PC98PLAYER が自分で作る INI と同じ文字コードで、Windows のメモ帳でもそのまま読める。
+// ブラウザには Shift_JIS へ変える機能が無いので、読む方（TextDecoder）で全部の 2 バイト文字を一度引いて逆引きの表を作る
+let SJIS_MAP = null;
+function sjisMap() {
+  if (SJIS_MAP) return SJIS_MAP;
+  SJIS_MAP = new Map();
+  const dec = new TextDecoder("shift_jis");
+  for (let b = 0xA1; b <= 0xDF; b++) SJIS_MAP.set(dec.decode(new Uint8Array([b])), [b]);   // 半角カナ
+  for (let hi = 0x81; hi <= 0xFC; hi++) {
+    if (hi >= 0xA0 && hi <= 0xDF) continue;
+    for (let lo = 0x40; lo <= 0xFC; lo++) {
+      if (lo === 0x7F) continue;
+      const c = dec.decode(new Uint8Array([hi, lo]));
+      if (c.length === 1 && c !== "\uFFFD" && !SJIS_MAP.has(c)) SJIS_MAP.set(c, [hi, lo]);
+    }
+  }
+  return SJIS_MAP;
+}
+function toSjis(text) {
+  const map = sjisMap(), out = [];
+  for (const ch of text) {
+    const cp = ch.codePointAt(0);
+    if (cp < 0x80) out.push(cp);
+    else { const b = map.get(ch); if (b) out.push(...b); else out.push(0x3F); }   // 表せない字は ?
+  }
+  return new Uint8Array(out);
+}
+async function download() {
+  // 改行は CRLF に（テキスト欄の中では LF になっている）
+  const text = $("#out").value.replace(/\r?\n/g, "\r\n");
+  const blob = new Blob([toSjis(text)], { type: "text/plain" });
+  if (window.showSaveFilePicker) {
+    try {
+      const h = await showSaveFilePicker({ suggestedName: "PC98PLAYER.INI", types: [{ description: "PC98PLAYER の設定", accept: { "text/plain": [".INI", ".ini"] } }] });
+      const w = await h.createWritable(); await w.write(blob); await w.close();
+      $("#status").textContent = "保存しました。";
+      return;
+    } catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  const a = el("a", { href: URL.createObjectURL(blob), download: "PC98PLAYER.INI" });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+build();
+$("#optAll").addEventListener("change", generate);
+$("#optComment").addEventListener("change", generate);
+$("#resetAll").addEventListener("click", () => resetAll());
+$("#importIni").addEventListener("change", async e => { const f = e.target.files[0]; if (f) loadIni(decode(await f.arrayBuffer())); e.target.value = ""; });
+$("#download").addEventListener("click", download);
+$("#copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("#out").value.replace(/\r?\n/g, "\r\n")); $("#status").textContent = "コピーしました。"; }
+  catch { $("#out").select(); document.execCommand("copy"); $("#status").textContent = "コピーしました。"; }
+});
+generate();
+</script>
+</body>
+</html>
