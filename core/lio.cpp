@@ -156,6 +156,7 @@ static int lio_gscreen(Machine* m, uint32_t a) {
             m->gdcs.display = 1;
             m->disp_bank = (uint8_t)bank;
             memset(m->gdcs.pram, 0, 4);
+            m->gdcs.csrform[0] = (uint8_t)((m->gdcs.csrform[0] & 0xE0) | (sm >= 2 ? 0 : 1));   // 200 ラインは CSRFORM で
             if (sm >= 2) { m->gfx_200 = 0; m->gdcs.zoom = 0; }
             else {
                 m->gfx_200 = 1; m->gfx_200_lower = 0; m->gdcs.zoom = 0;

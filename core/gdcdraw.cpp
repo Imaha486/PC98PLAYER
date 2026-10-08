@@ -82,6 +82,7 @@ Pen make_pen(Machine* m, Gdc* g) {
     Pen pn;
     pn.m = m; pn.g = g;
     pn.pitch = g->pitch ? g->pitch : 40;
+    if (g == &m->gdcs && m->gdc_clk5) pn.pitch = (pn.pitch + 1) / 2;   // 5MHz: PITCH はバイト単位 → ワードに直す
     if (pn.pitch > 80) pn.pitch = 80;
     uint32_t ead = g->ead;
     pn.plane = (int)((ead >> 14) & 3);

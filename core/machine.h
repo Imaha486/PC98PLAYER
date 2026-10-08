@@ -127,6 +127,7 @@ struct Config {
     std::string args;
     char     drive = 'A';
     int      cpu_mhz = 16;
+    int      gdc_5mhz = 0;          // DIP SW 2-8: グラフィック GDC を 5MHz で使える（0 = 2.5MHz の機械）
     int      sound_irq = 12;     // 既定は PC-9801-86 の INT5
     int      sound_board = 86;   // 86 / 26 / 0
     bool     sound_bios = false; // CC00h にサウンド BIOS（INT D2h）を置く（SoundBIOS=1）
@@ -233,6 +234,8 @@ struct Machine {
     uint8_t  gfx_200;           // 200 ライン表示
     uint8_t  gfx_200_lower;     // 200 ラインで下半分を表示
     uint8_t  gfx_color;         // カラー / モノクロ
+    uint8_t  gdc_clk5;          // グラフィック GDC がいま 5MHz（PITCH はバイト単位＝ 8 ドット）。0 = 2.5MHz（ワード単位）
+    uint8_t  mpu_off_noted;     // MIDI=0 のときに MPU を探しに来たことを記録したか（Trace の案内を 1 回だけ）
     uint8_t  border;
     uint8_t  egc_enabled;
 

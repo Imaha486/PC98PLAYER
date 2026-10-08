@@ -85,7 +85,7 @@ Drive=A              ; ゲームのフォルダを何ドライブに見せるか
 SoundBoard=86        ; 86 / 26 / 0（なし）
 SoundBIOS=0          ; 1 でサウンド BIOS（CC00h・INT D2h）を載せる（MIMPI の FM 演奏など。音色は自前）
 SoundIRQ=12          ; 3 / 10 / 12 / 13
-MIDI=0               ; 1 で MPU-PC98II（E0D0h）を載せ、Windows の MIDI 出力へ送る（RS-232C に送った MIDI も同じ出力へ）
+MIDI=1               ; 1 で MPU-PC98II（E0D0h）を載せ、Windows の MIDI 出力へ送る（RS-232C に送った MIDI も同じ出力へ）
 MidiDevice=-1        ; MIDI の出力先（-1 = 既定）
 FloppyImage=         ; 起動時に入れるフロッピーイメージ（D88 / ベタ / FDI / NFD / SCP / HFE）。F11 の画面で入れ替え・取り出し
 Boot=                ; FD: MS-DOS を使わず FloppyDisk= のフロッピーの IPL から起動（PC-98 初期の独自形式のディスク）
@@ -99,6 +99,7 @@ GWRevs=3             ; Greaseweazle で 1 トラックを何回転読むか（1�
 FloppyDrive=B        ; フロッピーのドライブ名（A〜Z。Drive=B と FloppyDrive=A で入れ替えも可）。Start=B:\INSTALL.BAT のようにも書ける
 CurrentDrive=        ; 起動時のカレントドライブ（空 = Start= のドライブ）
 CurrentDirectory=    ; 起動時のカレントディレクトリ（例 A:\NANPA\。無ければ作る）
+GDCClock=2.5         ; グラフィック GDC のクロック（DIP SW 2-8）。2.5 / 5
 FreeSpaceMB=96       ; ゲームのドライブの空き容量として見せる大きさ（MB）
 MidiSpeedFix=100     ; MIDI の演奏速度 %（10〜1000。MPU のテンポ＝クロック・トゥ・ホストだけを速める）
 EMS=1                ; EMS（EMM386 相当）。EMSKB=4096 で容量
@@ -264,11 +265,15 @@ PC-98 の漢字 ROM・ANK ROM を、**本物の ROM も第三者のビットマ�
 
 ## セキュリティソフトの警告について
 
-PC98PLAYER.EXE には電子署名がなく、mingw-w64 で静的リンクしているため、Windows Defender などが
-機械学習ベースの判定（例: `Trojan:Script/Wacatac.H!ml` の「!ml」は機械学習による推定の印）で誤検知することがあります（ネット接続・他プロセスへの干渉・キー入力の記録などは一切しません）。
-この版では誤検知を減らすため、バージョン情報・アプリケーションマニフェスト（asInvoker）・アイコンを埋め込み、
-シンボルの削除（strip）をやめています。それでも警告が出る場合は、同梱のソースから Visual Studio でビルドした
-EXE を使うか、Microsoft の誤検知報告（https://www.microsoft.com/wdsi/filesubmission）に提出してください。
+実行パッケージ（`PC98PLAYER_<版>.zip`）の PC98PLAYER.EXE は、公開しているソースコード（`PC98PLAYER_<版>_src.zip`）と同じものから Visual Studio 2026 でビルドしたものです。
+電子署名は付いていないため、ダウンロードや初回起動のときに Windows の SmartScreen が「発行元を確認できません」と警告したり、
+Windows Defender などが機械学習ベースの判定（例: `Trojan:Script/Wacatac.H!ml` の「!ml」は機械学習による推定の印）で誤検知したりすることがあります。
+PC98PLAYER はネット接続・他プロセスへの干渉・キー入力の記録などは一切しません。
+
+- 誤検知を減らすため、EXE にはバージョン情報・アプリケーションマニフェスト（asInvoker）・アイコンを埋め込んでいます。
+- 配布元（i486.mods.jp・GitHub の Releases）以外から入手した EXE は使わないでください。
+- それでも警告が出る場合は、ソースコード（`PC98PLAYER_<版>_src.zip`）から自分で Visual Studio でビルドするか、
+  Microsoft の誤検知報告（https://www.microsoft.com/wdsi/filesubmission）に提出してください。
 
 ## ビルド
 

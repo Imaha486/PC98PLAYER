@@ -88,6 +88,11 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
     std::string drv = G("DRIVE", "A");
     ps->cfg.drive = drv.empty() ? 'A' : (char)toupper((unsigned char)drv[0]);
     ps->cfg.cpu_mhz = I("CPUMHZ", I("CPUCLOCK", 16));
+    {   // GDCClock=2.5 / 5（DIP SW 2-8）。5 にすると、BIOS で 400 ライン表示にしたときグラフィック GDC が 5MHz になる
+        std::string g = G("GDCCLOCK", "2.5");
+        for (auto& c : g) c = (char)toupper((unsigned char)c);
+        ps->cfg.gdc_5mhz = (g == "5" || g == "5MHZ" || g == "5.0") ? 1 : 0;
+    }
     ps->cfg.sound_board = I("SOUNDBOARD", 86);
     ps->cfg.sound_bios = I("SOUNDBIOS", 0) != 0;
     ps->cfg.sound_irq = I("SOUNDIRQ", 12);
@@ -138,7 +143,7 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
             if (y >= 1980 && y <= 2099 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31) ps->cfg.fake_date = y * 10000 + mo * 100 + d;
         }
     }
-    ps->cfg.midi = I("MIDI", 0);
+    ps->cfg.midi = I("MIDI", 1);
     ps->cfg.midi_irq = I("MIDIIRQ", 6);
     {   // MIDI の演奏速度の補正（%）。MPU のテンポ（クロック・トゥ・ホスト）だけを速める
         int sp = I("MIDISPEEDFIX", 100);

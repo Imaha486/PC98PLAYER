@@ -433,6 +433,10 @@ static void int18(Machine* m) {
                 fontrom_gaiji_write(code, y, false, mem_rb(m, buf + 3 + y * 2));
             }
         return; }
+    case 0x1B:   // KCG のアクセスモード: AL=0 コードアクセス / AL=1 ドットアクセス（0053Ch bit3 とモードF/F の bit5）
+        if (AL(m) == 0) { m->ram[0x53C] &= (uint8_t)~0x08; m->modeff[5] = 0; }
+        else if (AL(m) == 1) { m->ram[0x53C] |= 0x08; m->modeff[5] = 1; }
+        return;
     case 0x40: m->gdcs.display = 1; m->ram[0x54C] |= 0x80; return;
     case 0x41: m->gdcs.display = 0; m->ram[0x54C] &= 0x7F; return;
     case 0x42: {
@@ -441,6 +445,9 @@ static void int18(Machine* m) {
         // CH bit7-6: 01 = VRAM の後半 200 ライン（SAD=8000 ワード）/ 10 = 前半 200 ライン / 11 = 400 ライン
         // （master.lib の graph_200line(1) は前者で、前半を隠し VRAM に使う: 東方夢時空）
         memset(m->gdcs.pram, 0, 4);
+        // 実機の BIOS と同じく、200 ラインはグラフィック GDC の CSRFORM（1 行の走査線数 = 2）で作る。
+        // （フラグで決め打ちにすると、あとでソフトが GDC に直接 CSRFORM を書いて 400 ラインに戻したときに縦 2 倍のままになる）
+        m->gdcs.csrform[0] = (uint8_t)((m->gdcs.csrform[0] & 0xE0) | (mode == 3 ? 0 : 1));
         if (mode == 3) { m->gfx_200 = 0; m->gdcs.zoom = 0; }
         else {
             m->gfx_200 = 1; m->gfx_200_lower = 0; m->gdcs.zoom = 0;
@@ -449,6 +456,10 @@ static void int18(Machine* m) {
         }
         m->gfx_color = (ch & 0x20) ? 0 : 1;
         m->disp_bank = (ch >> 4) & 1;
+        // GDC 5MHz の機械（0054Dh bit5）では、400 ライン表示にするとグラフィック GDC を 5MHz にし（bit2、PITCH 80 バイト）、
+        // 200 ライン表示に戻すと 2.5MHz（PITCH 40 ワード）に戻す
+        if (mode == 3 && (m->ram[0x54D] & 0x24) == 0x20) { m->ram[0x54D] |= 0x04; m->gdc_clk5 = 1; m->gdcs.pitch = 80; }
+        else if (mode != 3 && (m->ram[0x54D] & 0x24) == 0x24) { m->ram[0x54D] &= (uint8_t)~0x04; m->gdc_clk5 = 0; m->gdcs.pitch = 40; }
         return; }
     case 0x43: {   // パレット（デジタル）
         uint32_t a = lin(m->cpu.sr[DS_], BX(m));
@@ -771,7 +782,7 @@ void bios_init(Machine* m) {
     r[0x501] = 0x80 | 0x04;         // 8MHz 系, メモリ 640KB
     r[0x53C] = 0x00;
     r[0x54C] = 0x4E;                // 16 色ボードあり 等
-    r[0x54D] = 0x40;                // EGC あり
+    r[0x54D] = (uint8_t)(0x40 | (m->cfg.gdc_5mhz ? 0x20 : 0x00));   // EGC あり / bit5 = GDC 5MHz を使える（DIP SW 2-8）/ bit2 = いま 5MHz
     r[0x480] = 0x00;
     r[0x481] = 0x00;
     r[0x458] = 0x00;

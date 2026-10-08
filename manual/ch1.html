@@ -328,6 +328,7 @@ Start=A:\AUTOEXEC.BAT</pre>
   <tr><td><code>Smooth=</code></td><td>0</td><td>1 で拡大時になめらかにする（0 はドットのまま）。</td></tr>
   <tr><td><code>Font=</code></td><td>ＭＳ ゴシック</td><td>漢字の字形を作るもとにする Windows のフォント。</td></tr>
   <tr><td><code>FontShift=</code></td><td>1</td><td>半角文字が左端の列まで使っていたら 1 ドット右へ寄せ、実機の ROM と同じく左端を空ける。0 で Windows のフォントのまま（MIMPI V4 の曲名のように、半角を太字にして描くソフトで線が点線のように崩れるのを防ぐ）。</td></tr>
+  <tr><td><code>GDCClock=</code></td><td>2.5</td><td>グラフィック GDC のクロック（実機の DIP SW 2-8）。<code>2.5</code> か <code>5</code>。<code>5</code> にすると、BIOS で 400 ライン表示にしたときグラフィック GDC が 5MHz になり（1 行の長さ PITCH の単位がバイトに変わる）、DIP SW の状態（ポート 31h）・BIOS のワーク（0054Dh）・ポート 6Ah の 84h／85h も 5MHz の機械と同じに見せます。「GDC のクロックを 5MHz（2.5MHz）にしてください」と出て起動しないソフトや、画面が崩れるソフトで切り替えてください。F11 →「S: 画面＆サウンド設定」でも変えられます。</td></tr>
   <tr><td><code>KanjiJIS=</code></td><td>78</td><td>78: PC-98 と同じ旧 JIS の字の並び。83: 新 JIS の並び。</td></tr>
 </table>
 </div>
@@ -427,7 +428,7 @@ ExitOnEnd=0</pre>
   <li>多くのゲームは起動時に音源ボードを自動で判別します。既定の <code>SoundBoard=86</code> で、86 ボード用のドライバが選ばれるのが普通です。</li>
   <li>音が出ない・変な場合は <code>SoundBoard=26</code> を試してください。</li>
   <li>ゲーム側で割込み番号を設定する場合は <code>SoundIRQ=</code> を合わせます（INT0=3、INT41=10、INT5=12、INT6=13）。</li>
-  <li><code>MIDI=1</code> にすると、ゲームが FM より MIDI を選ぶことがあります。Windows 標準の MIDI 音源は当時の音源（SC-55 や MT-32）と音色が異なるので、FM で聴きたい場合は 0 のままにしてください。</li>
+  <li>自動で作る INI は <code>MIDI=1</code>（MIDI 音源あり）です。ゲームによっては FM より MIDI を自動で選びます。Windows 標準の MIDI 音源は当時の音源（SC-55 や MT-32）と音色が異なるので、FM で聴きたい場合は <code>MIDI=0</code> にしてください。</li>
 </ul>
 
 <h2 id="memory">1-10. メモリ（EMS／XMS）の設定</h2>

@@ -648,7 +648,7 @@ uint8_t io_in8_(Machine* m, uint16_t port) {
     case 0x0A: return pic_read(m, 1, 1);
     case 0x41: m->kb_ready = 0; return m->kb_data;
     case 0x43: return (uint8_t)(0x85 | (m->kb_ready ? 0x02 : 0));
-    case 0x31: return 0x63;                 // DIP SW 2
+    case 0x31: return (uint8_t)(0x63 | (m->cfg.gdc_5mhz ? 0x00 : 0x80));   // DIP SW 2（bit7 = SW 2-8: 0 で GDC 5MHz）
     case 0x33: return 0xE8;                 // bit3: 高解像度ではない（普通の 400 ライン）
     case 0x35: return m->portc;
     // プリンタのポート B。bit7=1・bit2=1（プリンタは忙しくない）・bit5=1（8MHz 系）・bit4=DIP SW 1-3（実機の標準はオン）。
@@ -676,7 +676,7 @@ uint8_t io_in8_(Machine* m, uint16_t port) {
     case 0xF2: return m->a20 ? 0x00 : 0x01;
     case 0xF6: return m->a20 ? 0x00 : 0x01;
     case 0x5F: return 0xFF;
-    case 0x9A0: return 0x00;                // 表示モード（24kHz）
+    case 0x9A0: return (uint8_t)(m->gdc_clk5 ? 0x02 : 0x00);   // 表示モード（24kHz）。bit1 = グラフィック GDC 5MHz
     case 0x9A8: return 0x00;                // 31kHz 非対応
     case 0x0E8E: case 0x0E8F: return 0xFF;
     }
@@ -734,6 +734,7 @@ void io_out8(Machine* m, uint16_t port, uint8_t v) {
     case 0x68: m->modeff[(v >> 1) & 7] = v & 1; return;
     case 0x6A: {
         int bit = (v >> 1) & 0x7F;
+        if (v == 0x84 || v == 0x85) { m->gdc_clk5 = (uint8_t)(v & 1); return; }   // グラフィック GDC のクロック 2.5MHz / 5MHz
         if (bit < 8) {
             if (bit == 2 && !m->modeff2[3]) return;   // EGC モードの切替は保護解除(07h)が要る
             m->modeff2[bit] = v & 1;
@@ -780,6 +781,10 @@ void io_out8(Machine* m, uint16_t port, uint8_t v) {
     case 0xF0: return;                      // CPU リセット（無視）
     }
     if (port >= 0x4A0 && port <= 0x4AF) { egc_out(m, port, v); return; }
+    if (!m->cfg.midi && port == 0xE0D2 && !m->mpu_off_noted && m->cfg.trace) {   // MIDI を切っているときに MPU を探しに来た
+        m->mpu_off_noted = 1;
+        plog("[midi] プログラムが MIDI（MPU-PC98II）を探しています。MIDI=0 なので「無い」と見えます。MIDI で鳴らすには MIDI=1\n");
+    }
     if (m->cfg.midi && port == 0xE0D0) { mpu_data(m, v); return; }
     if (m->cfg.midi && port == 0xE0D2) { mpu_command(m, v); return; }
     if (m->cfg.sound_board) {
@@ -1045,6 +1050,7 @@ void machine_state_save(Machine* m, StateW& w) {
     w.tag("MPU2"); w.pod(m->mpu);
     pcm86_state_save(m, w);
     w.tag("MDRV"); w.pod(m->mdrv);
+    w.tag("GCLK"); w.pod(m->gdc_clk5);
 }
 
 void machine_state_load(Machine* m, StateR& r) {
@@ -1062,6 +1068,7 @@ void machine_state_load(Machine* m, StateR& r) {
     r.pod(m->analog); r.pod(m->pal); r.pod(m->palidx); r.pod(m->degpal);
     r.pod(m->disp_bank); r.pod(m->draw_bank); r.pod(m->modeff); r.pod(m->modeff2);
     r.pod(m->gfx_200); r.pod(m->gfx_200_lower); r.pod(m->gfx_color); r.pod(m->border); r.pod(m->egc_enabled);
+    if (m->gfx_200 && !(m->gdcs.csrform[0] & 0x1F)) m->gdcs.csrform[0] |= 1;   // 旧形式のステート（200 ラインをフラグだけで持っていた）
     r.pod(m->grcg_mode); r.pod(m->grcg_tile); r.pod(m->grcg_idx);
     r.pod(m->cg_code); r.pod(m->cg_line); r.pod(m->cg_left);
     uint32_t n = r.u32(); if (n > 65536) { r.ok = false; return; }
@@ -1080,6 +1087,7 @@ void machine_state_load(Machine* m, StateR& r) {
     m->midi_out.clear();
     pcm86_state_load(m, r);
     if (r.peek_tag("MDRV")) { r.tag("MDRV"); uint16_t so = m->mdrv.stub_off, po = m->mdrv.ptr_off; r.pod(m->mdrv); m->mdrv.stub_off = so; m->mdrv.ptr_off = po; }
+    if (r.peek_tag("GCLK")) { r.tag("GCLK"); r.pod(m->gdc_clk5); } else m->gdc_clk5 = 0;
     // 派生状態の作り直し
     g_addr_mask = m->a20 ? 0x1FFFFF : 0xFFFFF;
     m->regw.clear(); m->beepw.clear();

@@ -17,6 +17,7 @@ static void fk(void*, uint16_t jis, uint8_t out[32]) {
 }
 static void fa(void*, uint8_t c, uint8_t out[16]) { memcpy(out, &g_font[94 * 94 * 32 + c * 16], 16); }
 
+static int g_hframe;
 struct KeyEv { int frame; int sc; int down; };
 struct MouseEv { int frame, dx, dy, b; };
 static std::vector<MouseEv> mev;
@@ -108,10 +109,11 @@ int main(int argc, char** argv) {
     if (getenv("NOEMS")) ps.cfg.ems = false;
     if (getenv("NOXMS")) ps.cfg.xms_kb = 0;
     p->init(ps, &err);
-    if (getenv("MIDI")) p->midi_sink = [](void*, const uint8_t* msg, int len) { fprintf(stderr, "[midi]"); for (int i = 0; i < len && i < 16; i++) fprintf(stderr, " %02X", msg[i]); fprintf(stderr, "\n"); };
+    if (getenv("MIDI")) p->midi_sink = [](void*, const uint8_t* msg, int len) { fprintf(stderr, "[midi %d]", g_hframe); for (int i = 0; i < len && i < 16; i++) fprintf(stderr, " %02X", msg[i]); fprintf(stderr, "\n"); };
     std::vector<int16_t> pcm;
     clock_t c0 = clock();
     for (int f = 0; f < frames; f++) {
+        g_hframe = f;
         for (auto& k : keys) {
             if (k.down == 2) { if (k.frame == f) machine_key(p->m, (uint8_t)k.sc, true); if (k.frame + 6 == f) machine_key(p->m, (uint8_t)k.sc, false); }
             else if (k.frame == f) machine_key(p->m, (uint8_t)k.sc, k.down != 0);
