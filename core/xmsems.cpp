@@ -83,7 +83,7 @@ static void xms_call(Machine* m) {
     case 0x01: if (s_hma_used) { fail(0x91); return; } s_hma_used = true; SETAX(m, 1); return;
     case 0x02: if (!s_hma_used) { fail(0x93); return; } s_hma_used = false; SETAX(m, 1); return;
     case 0x03: case 0x05:
-        m->a20 = 1; g_addr_mask = 0x1FFFFF; SETAX(m, 1); SETBL(m, 0); return;
+        m->a20 = 1; g_addr_mask = A20_ON_MASK; SETAX(m, 1); SETBL(m, 0); return;
     case 0x04: case 0x06:
         m->a20 = 0; g_addr_mask = 0xFFFFF; SETAX(m, 1); SETBL(m, 0); return;
     case 0x07: SETAX(m, m->a20 ? 1 : 0); SETBL(m, 0); return;
@@ -160,7 +160,7 @@ bool xms_int2f(Machine* m) {
     if (!xms_enabled(m)) return false;
     uint16_t ax = AX(m);
     if (ax == 0x4300) { SETAL(m, 0x80); return true; }
-    if (ax == 0x4310) { m->cpu.sr[ES_] = ROMSEG; SETBX(m, s_xms_entry_off); return true; }
+    if (ax == 0x4310) { cpu_setsr(&m->cpu, ES_, ROMSEG); SETBX(m, s_xms_entry_off); return true; }
     return false;
 }
 

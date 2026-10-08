@@ -141,6 +141,7 @@ const SCHEMA = [
     { key: "EMSKB", label: "EMS の容量", type: "number", def: "4096", min: 0, max: 32768, unit: "KB" },
     { key: "XMS", label: "XMS", type: "check", def: "1", on: "1", off: "0", text: "XMS（HIMEM.SYS 相当）を用意する" },
     { key: "XMSKB", label: "XMS の容量", type: "number", def: "8192", min: 0, max: 65536, unit: "KB" },
+    { key: "ExtMemMB", label: "拡張メモリ", type: "number", def: "8", min: 0, max: 14, unit: "MB", help: "1MB より上の RAM。EMS/XMS を通さず、自分で保護モードに切り替えて使うゲーム向けです（「プロテクトメモリが確保出来ません」と出るとき）。0 で無し。" },
     { key: "FirstMCB", label: "空きメモリの始まり", type: "text", def: "", placeholder: "例: 0200（16 進）", help: "一部のゲームはこの位置によって動いたり落ちたりします（第四章）。" },
     { key: "DOSVersion", label: "MS-DOS の版", type: "select", def: "5.00", options: [["5.00","5.00"],["3.30","3.30"],["3.10","3.10"],["6.20","6.20"]], help: "「DOS のバージョンが違います」と出るときに。" },
     { key: "FakeYear", label: "見せる年", type: "text", def: "", placeholder: "例: 1998", help: "年だけを置き換えます（2000 年問題対策）。" },

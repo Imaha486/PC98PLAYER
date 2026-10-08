@@ -12,6 +12,7 @@
 Machine* g_m = nullptr;
 uint8_t* g_ram = nullptr;
 uint32_t g_addr_mask = 0xFFFFF;
+uint32_t g_ram_top = PC98_RAM_SIZE;
 uint32_t g_side_fx = 0;
 extern int g_irq_hint;
 
@@ -303,7 +304,10 @@ static void gdc_param(Machine* m, Gdc* g, uint8_t v) {
     uint8_t c = g->cmd;
     int n = g->pcount++;
     if (c == 0x0E || c == 0x0F || c == 0x00) { if (n < 8) g->sync[n] = v; if (c == 0x00) g->display = 0; }
-    else if (c == 0x4B) { if (n < 3) g->csrform[n] = v; }
+    else if (c == 0x4B) {
+        if (n < 3) g->csrform[n] = v;
+        if (m->cfg.trace && g == &m->gdcm && n < 3) { static int k = 0; if (k < 24) { k++; plog("[gdc] テキスト GDC の CSRFORM P%d=%02Xh\n", n + 1, v); } }
+    }
     else if (c == 0x47) g->pitch = v;
     else if (c == 0x46) g->zoom = v;
     else if (c == 0x49) {
@@ -542,7 +546,7 @@ uint8_t mem_rb_slow(Machine* m, uint32_t a) {
     if (a >= 0xCC000 && a < 0xD0000 && m->cfg.sound_bios && m->cfg.sound_board) return m->ram[a];   // サウンド BIOS の ROM
     if (a < 0xE0000) return 0xFF;
     if (a < 0x100000) return m->ram[a];
-    if (a < PC98_RAM_SIZE) return m->ram[a];
+    if (a < g_ram_top) return m->ram[a];
     return 0xFF;
 }
 uint32_t g_watch_lo = 0, g_watch_hi = 0;
@@ -566,7 +570,7 @@ void mem_wb_slow(Machine* m, uint32_t a, uint8_t v) {
     if (a >= 0xD0000 && a < 0xE0000 && m->cfg.ems) { m->ram[a] = v; return; }   // EMS ページフレーム
     if (a < 0xE8000) return;
     if (a < 0x100000) return;                 // ROM
-    if (a < PC98_RAM_SIZE) m->ram[a] = v;
+    if (a < g_ram_top) m->ram[a] = v;
 }
 uint16_t mem_rw_slow(Machine* m, uint32_t a) {
     g_side_fx++;
@@ -775,8 +779,8 @@ void io_out8(Machine* m, uint16_t port, uint8_t v) {
         }
         return;
     case 0xBFDB: m->mouse.freq = v & 3; return;
-    case 0xF2: m->a20 = 1; g_addr_mask = 0x1FFFFF; return;
-    case 0xF6: if (v == 0x02) { m->a20 = 1; g_addr_mask = 0x1FFFFF; } else if (v == 0x03) { m->a20 = 0; g_addr_mask = 0xFFFFF; } return;
+    case 0xF2: m->a20 = 1; g_addr_mask = A20_ON_MASK; return;
+    case 0xF6: if (v == 0x02) { m->a20 = 1; g_addr_mask = A20_ON_MASK; } else if (v == 0x03) { m->a20 = 0; g_addr_mask = 0xFFFFF; } return;
     case 0x5F: return;
     case 0xF0: return;                      // CPU リセット（無視）
     }
@@ -958,8 +962,13 @@ Machine* machine_create(const Config& cfg) {
     Machine* m = new Machine();
     g_m = m;
     m->cfg = cfg;
-    m->ram = (uint8_t*)calloc(1, PC98_RAM_SIZE);
+    {
+        uint32_t ext = cfg.ext_kb > 0 ? (uint32_t)(cfg.ext_kb > 14336 ? 14336 : cfg.ext_kb) * 1024u : 0;   // 15MB まで（0401h の上限）
+        m->ram_size = 0x100000u + (ext > 0x10000u ? ext : 0x10000u);
+    }
+    m->ram = (uint8_t*)calloc(1, m->ram_size);
     g_ram = m->ram;
+    g_ram_top = m->ram_size;
     g_addr_mask = 0xFFFFF;
     memset(m->tvram, 0, sizeof(m->tvram));
     memset(m->gvram, 0, sizeof(m->gvram));
@@ -980,6 +989,8 @@ Machine* machine_create(const Config& cfg) {
     m->gdcm.display = 1; m->gdcs.display = 0;
     m->gdcs.pram[3] = 0x19;   // LEN1 = 400
     m->gdcm.csrform[0] = 0x0F;   // 16 ライン/行
+    m->gdcm.csrform[1] = 0xC0;   // カーソルの開始ライン 0（と点滅の速さ）
+    m->gdcm.csrform[2] = 0x7B;   // カーソルの終了ライン 15
     m->modeff[3] = 1;            // 高解像度（400 ライン）
     // 既定のデジタルパレット（0..7 がそのまま）
     for (int u = 0; u < 2; u++) { m->fd_seen[u] = floppy::change_count_unit(u); m->fd_irq_stage[u] = 0; m->fd_irq_wait[u] = 0; }
@@ -1025,11 +1036,28 @@ static void gdc_load(StateR& r, Gdc& g) {
 }
 
 void machine_state_save(Machine* m, StateW& w) {
-    w.tag("CPU ");
+    w.tag("CPU2");
     Cpu c = m->cpu; c.m = nullptr;
     w.pod(c);
     w.tag("MEM ");
     w.bytes(m->ram, PC98_RAM_SIZE);
+    // 拡張メモリ（HMA の上）: 0 が続くところを縮めて書く（[0 の数 u32][そのあとの非 0 の数 u32][非 0 のバイト列] の繰り返し）
+    w.tag("XMEM");
+    {
+        uint32_t n = m->ram_size - PC98_RAM_SIZE, i = 0;
+        w.u32(n);
+        const uint8_t* p = m->ram + PC98_RAM_SIZE;
+        while (i < n) {
+            uint32_t z = 0; while (i + z < n && !p[i + z]) z++;
+            uint32_t j = i + z, k = 0, zr = 0;
+            while (j + k < n) {
+                if (p[j + k]) { zr = 0; k++; }
+                else { zr++; k++; if (zr >= 16) { k -= zr; break; } }
+            }
+            w.u32(z); w.u32(k); if (k) w.bytes(p + j, k);
+            i = j + k;
+        }
+    }
     w.pod(m->tvram); w.bytes(m->gvram, sizeof(m->gvram));
     w.tag("DEV ");
     w.pod(m->pic); w.pod(m->pit); w.pod(m->pit_frac);
@@ -1054,12 +1082,39 @@ void machine_state_save(Machine* m, StateW& w) {
 }
 
 void machine_state_load(Machine* m, StateR& r) {
-    r.tag("CPU ");
     Machine* keep = m->cpu.m;
-    r.pod(m->cpu);
+    if (r.peek_tag("CPU2")) { r.tag("CPU2"); r.pod(m->cpu); }
+    else {                                       // 旧形式: リアルモードだけの CPU
+        r.tag("CPU ");
+        CpuV1 o; r.pod(o);
+        Cpu& c = m->cpu;
+        memset(&c, 0, sizeof(c));
+        memcpy(c.r, o.r, sizeof(c.r)); memcpy(c.sr, o.sr, sizeof(c.sr));
+        c.ip = o.ip; c.fl = o.fl; c.cr0 = o.cr0 & ~1u; c.halted = o.halted; c.inhibit_irq = o.inhibit_irq;
+        c.op_ip = o.op_ip; c.op_cs = o.op_cs; c.cycles = o.cycles; c.undef_count = o.undef_count;
+        c.idt_limit = 0x3FF;
+        for (int i = 0; i < 6; i++) { c.csel[i] = c.sr[i]; c.cbase[i] = (uint32_t)c.sr[i] << 4; c.climit[i] = 0xFFFF; }
+    }
     m->cpu.m = keep;
     r.tag("MEM ");
     r.bytes(m->ram, PC98_RAM_SIZE);
+    memset(m->ram + PC98_RAM_SIZE, 0, m->ram_size - PC98_RAM_SIZE);
+    if (r.peek_tag("XMEM")) {
+        r.tag("XMEM");
+        uint32_t n = r.u32(), i = 0, have = m->ram_size - PC98_RAM_SIZE;
+        uint8_t* p = m->ram + PC98_RAM_SIZE;
+        std::vector<uint8_t> tmp;
+        while (i < n && r.ok) {
+            uint32_t z = r.u32(), k = r.u32();
+            if (z > n - i || k > n - i - z) { r.ok = false; break; }
+            i += z;
+            if (k) {
+                tmp.resize(k); r.bytes(tmp.data(), k);
+                for (uint32_t q = 0; q < k && i + q < have; q++) p[i + q] = tmp[q];
+            }
+            i += k;
+        }
+    }
     r.pod(m->tvram); r.bytes(m->gvram, sizeof(m->gvram));
     r.tag("DEV ");
     r.pod(m->pic); r.pod(m->pit); r.pod(m->pit_frac);
@@ -1089,7 +1144,7 @@ void machine_state_load(Machine* m, StateR& r) {
     if (r.peek_tag("MDRV")) { r.tag("MDRV"); uint16_t so = m->mdrv.stub_off, po = m->mdrv.ptr_off; r.pod(m->mdrv); m->mdrv.stub_off = so; m->mdrv.ptr_off = po; }
     if (r.peek_tag("GCLK")) { r.tag("GCLK"); r.pod(m->gdc_clk5); } else m->gdc_clk5 = 0;
     // 派生状態の作り直し
-    g_addr_mask = m->a20 ? 0x1FFFFF : 0xFFFFF;
+    g_addr_mask = m->a20 ? A20_ON_MASK : 0xFFFFF;
     m->regw.clear(); m->beepw.clear();
     m->quit = 0; m->status.clear();
     pic_update_hint(m);

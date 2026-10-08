@@ -195,6 +195,7 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
     if (ps->cfg.ems_kb < 16) ps->cfg.ems = false;
     if (ps->cfg.ems_kb > 32768) ps->cfg.ems_kb = 32768;
     ps->cfg.xms_kb = I("XMS", 1) ? I("XMSKB", 8192) : 0;
+    ps->cfg.ext_kb = I("EXTMEMMB", 8) * 1024;   // 拡張メモリ（MB）。0 で無し
     if (ps->cfg.xms_kb > 65535) ps->cfg.xms_kb = 65535;
     return !ps->cfg.start.empty() || ps->cfg.boot_fd;
 }

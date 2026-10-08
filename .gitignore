@@ -3,7 +3,7 @@ out/
 build/
 .vs/
 x64/
-Win32/
+# 注意: "Win32/" と書くと、Windows（大文字小文字を区別しない）ではソースの win32/ まで無視されるので書かない
 Debug/
 Release/
 *.exe

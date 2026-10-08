@@ -375,6 +375,8 @@ static void int18(Machine* m) {
         uint8_t al = AL(m);
         m->ram[0x53C] = al;
         m->gdcm.csrform[0] = (uint8_t)((m->gdcm.csrform[0] & 0xE0) | ((al & 1) ? 19 : 15));
+        m->gdcm.csrform[1] = (uint8_t)(m->gdcm.csrform[1] & 0xE0);                       // カーソルは 0 ライン目から
+        m->gdcm.csrform[2] = (uint8_t)((((al & 1) ? 19 : 15) << 3) | 3);                  // 最後のラインまで
         s_con.rows = (al & 1) ? 20 : 25;
         m->ram[0x712] = (uint8_t)(s_con.rows - 1);
         m->modeff[0] = (al & 4) ? 1 : 0;   // 属性 bit4 = 簡易グラフ(1) / バーチカルライン(0)
@@ -617,7 +619,7 @@ static void int33(Machine* m) {
     case 0x14: {   // ハンドラの入れ替え: 古いものを CX, ES:DX に返す
         uint16_t om = d->cb_mask, os = d->cb_seg, oo = d->cb_off;
         mdrv_set_handler(m, CX(m), m->cpu.sr[ES_], DX(m));
-        SETCX(m, om); m->cpu.sr[ES_] = os; SETDX(m, oo);
+        SETCX(m, om); cpu_setsr(&m->cpu, ES_, os); SETDX(m, oo);
         return; }
     case 0x15: SETBX(m, 64); return;          // 状態の保存に要る大きさ
     case 0x16: case 0x17: return;              // 状態の保存・復元（何もしない）
@@ -709,7 +711,28 @@ void bios_hle(Machine* m, uint8_t n) {
         }
         if (m->cfg.trace) plog("[fd] INT1B AX=%04X（フロッピー以外の装置: 未接続を返す）\n", (unsigned)(m->cpu.r[EAX] & 0xFFFF));
         SETAH(m, 0x60); set_cf(m, true); return;
-    case HLE_INT1F: SETAH(m, 0x00); set_cf(m, true); return;
+    case HLE_INT1F: {
+        // INT 1Fh: AH=90h は 1MB より上とのブロック転送（ES:BX+10h/+18h の記述子にある 24 ビットの
+        // ベースと上限、SI/DI がそれぞれのオフセット、CX がバイト数）
+        uint8_t ah = AH(m);
+        if (!(ah & 0x80)) return;
+        if (ah == 0xCC) { set_cf(m, true); return; }
+        if (!(ah & 0x10)) { set_cf(m, false); return; }
+        if (ah != 0x90) return;
+        uint32_t t = ((uint32_t)m->cpu.sr[ES_] << 4) + (uint16_t)BX(m);
+        uint8_t w[16];
+        for (int i = 0; i < 16; i++) w[i] = mem_rb(m, t + 0x10 + i);
+        uint32_t slim = (uint32_t)(w[0] | (w[1] << 8)) + 1, dlim = (uint32_t)(w[8] | (w[9] << 8)) + 1;
+        uint32_t sbase = w[2] | (w[3] << 8) | ((uint32_t)w[4] << 16), dbase = w[10] | (w[11] << 8) | ((uint32_t)w[12] << 16);
+        uint32_t so = (uint16_t)m->cpu.r[ESI], dof = (uint16_t)m->cpu.r[EDI];
+        uint32_t n = (uint32_t)(uint16_t)(CX(m) - 1) + 1;
+        if (so >= slim || dof >= dlim || so + n > slim || dof + n > dlim) { set_cf(m, true); return; }
+        uint32_t keep = g_addr_mask; g_addr_mask = A20_ON_MASK;
+        for (uint32_t i = 0; i < n; i++) mem_wb(m, dbase + dof + i, mem_rb(m, sbase + so + i));
+        g_addr_mask = keep;
+        { static int k = 0; if (m->cfg.trace && k < 16) { k++; plog("[bios] INT1F AH=90 %06X → %06X（%u バイト）\n", sbase + so, dbase + dof, n); } }
+        set_cf(m, false);
+        return; }
     case HLE_INT33: if (m->cfg.trace > 1) plog("[mouse] INT 33h AX=%04X BX=%04X CX=%04X DX=%04X\n", AX(m), BX(m), CX(m), DX(m)); int33(m); return;
     case HLE_MSIRQ: mdrv_irq(m); return;
     case HLE_MSIRQ_END: m->mdrv.in_cb = 0; return;
@@ -784,6 +807,10 @@ void bios_init(Machine* m) {
     r[0x54C] = 0x4E;                // 16 色ボードあり 等
     r[0x54D] = (uint8_t)(0x40 | (m->cfg.gdc_5mhz ? 0x20 : 0x00));   // EGC あり / bit5 = GDC 5MHz を使える（DIP SW 2-8）/ bit2 = いま 5MHz
     r[0x480] = 0x00;
+    // 拡張メモリの大きさ（0401h: 1MB より上を 128KB 単位、0594h: 16MB より上を 1MB 単位）
+    r[0x401] = (uint8_t)((m->ram_size - 0x100000u) / 0x20000u);
+    if (m->ram_size - 0x100000u <= 0x10000u) r[0x401] = 0;
+    r[0x594] = 0;
     r[0x481] = 0x00;
     r[0x458] = 0x00;
     r[0x55D] = 0x01;               // ハードディスク（SASI/IDE）がユニット 0 に付いている（ゲームのフォルダ）
@@ -887,7 +914,7 @@ bool bios_boot_fd(Machine* m, std::string* why) {
     Cpu* c = &m->cpu;
     for (int i = 0; i < 8; i++) c->r[i] = 0;
     c->r[ESP] = 0x0000;
-    c->sr[CS_] = seg; c->sr[DS_] = 0; c->sr[ES_] = 0; c->sr[SS_] = 0x1FC0;
+    cpu_setsr(c, CS_, seg); cpu_setsr(c, DS_, 0); cpu_setsr(c, ES_, 0); cpu_setsr(c, SS_, 0x1FC0);
     c->ip = 0;
     c->fl |= FL_IF;
     c->r[EAX] = 0x0090;            // AL = 起動したドライブ

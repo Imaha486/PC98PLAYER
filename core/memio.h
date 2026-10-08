@@ -6,10 +6,13 @@
 struct Machine;
 
 // 物理メモリ（1MB + HMA 64KB）。0xA0000 未満はただの RAM なので CPU が直接触る。
+// その上に拡張メモリ（1MB より上。保護モードのソフトが使う）が続く（全体の大きさは g_ram_top）
 #define PC98_RAM_SIZE 0x110000u
+#define A20_ON_MASK   0x00FFFFFFu     // A20 を開けたとき（PC-9801 の 386SX 機と同じ 16MB の空間）
 
 extern uint8_t* g_ram;            // 高速パス用（Machine が設定）
-extern uint32_t g_addr_mask;      // A20 マスク（0xFFFFF または 0x10FFFF 付近を許すため 0x1FFFFF）
+extern uint32_t g_ram_top;        // g_ram の大きさ（PC98_RAM_SIZE 以上。拡張メモリの終わり）
+extern uint32_t g_addr_mask;      // A20 マスク（0xFFFFF または A20_ON_MASK）
 // 「外に影響する（または外から値が変わりうる）アクセス」の回数。メモリへの書き込み・I/O・HLE トラップ・
 // VRAM/ROM など RAM 以外の読み出しで増える。CPU の空回り（割込み待ちのループ）を見分けるのに使う
 extern uint32_t g_side_fx;
@@ -31,25 +34,26 @@ static inline uint32_t lin_mask(uint32_t a) {
     a &= g_addr_mask;
     return a;
 }
+static inline bool ext_ram(uint32_t a) { return a >= 0x100000u && a < g_ram_top; }
 static inline uint8_t mem_rb(Machine* m, uint32_t a) {
     a = lin_mask(a);
-    if (a < 0xA0000u) return g_ram[a];
+    if (a < 0xA0000u || ext_ram(a)) return g_ram[a];
     return mem_rb_slow(m, a);
 }
 static inline void mem_wb(Machine* m, uint32_t a, uint8_t v) {
     a = lin_mask(a);
-    if (a < 0xA0000u) { if (g_ram[a] != v) { g_ram[a] = v; g_side_fx++; } return; }   // 同じ値の書き込みは影響なし
+    if (a < 0xA0000u || ext_ram(a)) { if (g_ram[a] != v) { g_ram[a] = v; g_side_fx++; } return; }   // 同じ値の書き込みは影響なし
     g_side_fx++;
     mem_wb_slow(m, a, v);
 }
 static inline uint16_t mem_rw(Machine* m, uint32_t a) {
     uint32_t b = lin_mask(a);
-    if (b < 0x9FFFFu) return (uint16_t)(g_ram[b] | (g_ram[b + 1] << 8));
+    if (b < 0x9FFFFu || (b >= 0x100000u && b + 1 < g_ram_top)) return (uint16_t)(g_ram[b] | (g_ram[b + 1] << 8));
     return mem_rw_slow(m, a);
 }
 static inline void mem_ww(Machine* m, uint32_t a, uint16_t v) {
     uint32_t b = lin_mask(a);
-    if (b < 0x9FFFFu) {
+    if (b < 0x9FFFFu || (b >= 0x100000u && b + 1 < g_ram_top)) {
         if (g_ram[b] != (uint8_t)v || g_ram[b + 1] != (uint8_t)(v >> 8)) { g_ram[b] = (uint8_t)v; g_ram[b + 1] = (uint8_t)(v >> 8); g_side_fx++; }
         return;
     }

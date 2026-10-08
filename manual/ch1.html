@@ -392,6 +392,7 @@ Start=A:\AUTOEXEC.BAT</pre>
   <tr><td><code>EMSKB=</code></td><td>4096</td><td>EMS の容量（KB）。</td></tr>
   <tr><td><code>XMS=</code></td><td>1</td><td>1: XMS（HIMEM.SYS 相当）を用意する。</td></tr>
   <tr><td><code>XMSKB=</code></td><td>8192</td><td>XMS の容量（KB）。</td></tr>
+  <tr><td><code>ExtMemMB=</code></td><td>8</td><td>拡張メモリ（1MB より上の RAM）の大きさ（MB、14 まで）。EMS/XMS を通さずに自分で保護モードへ切り替えて使うゲーム向けです（「プロテクトメモリが確保出来ません」と出るとき）。BIOS（0401h）に見せ、INT 1Fh のブロック転送でも使えます。0 で無し。</td></tr>
   <tr><td><code>MemoryKB=</code></td><td>640</td><td>通常メモリの大きさ（KB）。</td></tr>
   <tr><td><code>FirstMCB=</code></td><td>0200</td><td>空きメモリの始まる位置（16 進のセグメント）。一部のゲームはこの位置によって動いたり落ちたりします（<a href="ch4.html#crash">第四章</a>）。</td></tr>
 </table>
@@ -437,7 +438,7 @@ ExitOnEnd=0</pre>
 <ul>
   <li>通常メモリの空きは、起動した直後でおよそ 627KB です。</li>
   <li>EMS や XMS があると落ちるゲームがあれば、<code>EMS=0</code>、<code>XMS=0</code> を 1 つずつ試してください。</li>
-  <li>DOS エクステンダ（プロテクトモード）や VCPI/DPMI を必要とするゲームには対応していません。</li>
+  <li>自分でプロテクトモード（保護モード）に切り替えて 1MB より上のメモリを使うゲームは動きます（<code>ExtMemMB=</code>）。ページング・仮想 86 モードを使うもの、VCPI/DPMI（EMM386 の下で動く DOS エクステンダ）を必要とするものには対応していません。</li>
 </ul>
 
 <h2 id="gamepad">1-11. ゲームパッド</h2>

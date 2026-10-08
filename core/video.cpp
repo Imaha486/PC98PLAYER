@@ -143,8 +143,10 @@ void video_render(Machine* m, uint32_t* out) {
         uint32_t ead = m->gdcm.ead & 0xFFF;
         int r = (int)(ead / 80), c = (int)(ead % 80);
         if (r < rows) {
+            // カーソルの形: CSRFORM の開始ライン〜終了ライン。開始が終了より下なら何も出ない
+            //（カーソルを消すのに表示ビットではなくこちらを使うソフトがある）
             int top = m->gdcm.csrform[1] & 0x1F, bot = (m->gdcm.csrform[2] >> 3) & 0x1F;
-            if (bot < top || bot >= rowh) { top = 0; bot = rowh - 1; }
+            if (bot >= rowh) bot = rowh - 1;
             for (int y = top; y <= bot; y++) {
                 if (r * rowh + y >= 400) break;
                 uint32_t* o = out + (r * rowh + y) * 640 + c * 8;

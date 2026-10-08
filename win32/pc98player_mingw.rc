@@ -1,0 +1,4 @@
+// mingw-w64 用: バージョン情報・アイコンに加えてマニフェストも埋め込む
+// （Visual Studio / CMake(MSVC) ではリンカが既定のマニフェスト（asInvoker）を埋め込むので pc98player.rc だけを使う）
+#include "pc98player.rc"
+1 24 "pc98player.manifest"

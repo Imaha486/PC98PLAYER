@@ -59,7 +59,7 @@ EXE を 1 か所に置いたまま使い回す場合は、ショートカット�
 | 層 | 中身 |
 |---|---|
 | CPU | i386 リアルモードのインタプリタ（8086/V30/286 上位互換、32bit レジスタ・386 命令込み） |
-| ハードウェア | GDC（テキスト/グラフィック、200 ライン表示）、GRCG、**EGC**、16 色アナログパレット、8259、8253、キーボード、バスマウス、漢字 ROM ポート・外字、YM2608(OPNA)、**86 ボードの PCM**、**MPU-PC98II（MIDI）**・RS-232C の MIDI 出力、ROM のグラフィック LIO（INT A0h-AFh。画面設定・色・点・線・箱・塗りつぶし・GGET/GPUT1。円・PAINT・漢字の GPUT2 は未対応）、**サウンド BIOS**（INT D2h。`SoundBIOS=1`。音色は自前）、ブザーの音程の変化（BEEP 演奏）、**仮想フロッピー**（D88/ベタ/FDI/NFD/SCP/HFE、実機の USB フロッピー・Greaseweazle。INT 1Bh の ID 指定読み書き・READ ID、DOS の FAT12/16 ドライブ、INT 25h/26h） |
+| ハードウェア | GDC（テキスト/グラフィック、200 ライン表示）、GRCG、**EGC**、16 色アナログパレット、8259、8253、キーボード、バスマウス、漢字 ROM ポート・外字、YM2608(OPNA)、**86 ボードの PCM**、**MPU-PC98II（MIDI）**・RS-232C の MIDI 出力、ROM のグラフィック LIO（INT A0h-AFh。画面設定・色・点・線・箱・塗りつぶし・GGET/GPUT1。円・PAINT・漢字の GPUT2 は未対応）、**サウンド BIOS**（INT D2h。`SoundBIOS=1`。音色は自前）、ブザーの音程の変化（BEEP 演奏）、**386 の保護モード**（GDT/LDT/IDT・32 ビットのコード。特権の検査・ページングは省略）と拡張メモリ（`ExtMemMB=`、INT 1Fh のブロック転送）、**仮想フロッピー**（D88/ベタ/FDI/NFD/SCP/HFE、実機の USB フロッピー・Greaseweazle。INT 1Bh の ID 指定読み書き・READ ID、DOS の FAT12/16 ドライブ、INT 25h/26h） |
 | BIOS | HLE: INT 18h（キー/CRT/グラフィック）、INT 1Ch（時計/インターバルタイマ）、IRQ1、INT 33h（マウスドライバ: カーソル表示・イベントハンドラ）、INT DCh |
 | DOS | HLE: INT 21h をゲームのフォルダへ直結（ファイル・FCB・MCB メモリ管理・EXEC・常駐終了・FindFirst・SFT/List of Lists など） |
 | 拡張メモリ | HLE: **HIMEM.SYS（XMS 3.0）** と **EMM386（LIM EMS 4.0、ページフレーム D000h）** |
@@ -104,6 +104,7 @@ FreeSpaceMB=96       ; ゲームのドライブの空き容量として見せる
 MidiSpeedFix=100     ; MIDI の演奏速度 %（10〜1000。MPU のテンポ＝クロック・トゥ・ホストだけを速める）
 EMS=1                ; EMS（EMM386 相当）。EMSKB=4096 で容量
 XMS=1                ; XMS（HIMEM.SYS 相当）。XMSKB=8192 で容量
+ExtMemMB=8           ; 拡張メモリ（1MB より上の RAM、MB）。自分で保護モードに入るゲーム向け。0 で無し
 FirstMCB=0200        ; 先頭 MCB のセグメント（16 進）。空きメモリの始まり。ソフトによって調整
 FakeYear=            ; 2000 年問題対策: 年だけこの値にする（例 1998）
 FakeDate=            ; 2000 年問題対策: 起動した日をこの日付にする（例 1999/12/31）。以後は実時間で進む
@@ -248,7 +249,7 @@ PC-98 の漢字 ROM・ANK ROM を、**本物の ROM も第三者のビットマ�
 - サウンド BIOS（INT D2h）の MML 演奏などの機能（MIMPI が使う、レジスタ書き込み・発音・音色・音量だけ対応）
 - ADPCM（86 ボード＋ちびおと、SPB 等の ADPCM RAM）
 - MPU-PC98II のインテリジェントモードの演奏機能（UART モードと、D0h 系の直接送信・問い合わせのみ対応）
-- 保護モード（DOS エクステンダ、VCPI/DPMI）。EMS/XMS は実モードの範囲で使えます
+- 保護モードのうち、ページング・仮想 86 モード・タスク切り替え、VCPI/DPMI（EMM386 の下で動く DOS エクステンダ）。自分で保護モードに切り替えて拡張メモリを使うソフトは動きます（`ExtMemMB=`）
 - 256 色（PEGC）、31kHz 表示
 - N88-BASIC(86)（ROM）で動くソフト（ブートモードで ROM の BASIC を呼ぶと、その旨を表示して終了）
 

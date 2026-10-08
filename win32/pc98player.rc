@@ -1,0 +1,31 @@
+#include <winver.h>
+#include "version.h"
+1 ICON "pc98player.ico"
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION PC98P_VER_Y,PC98P_VER_M,PC98P_VER_D,0
+ PRODUCTVERSION PC98P_VER_Y,PC98P_VER_M,PC98P_VER_D,0
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE 0x0L
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "041104b0"
+    BEGIN
+      VALUE "CompanyName", "PC98PLAYER project"
+      VALUE "FileDescription", "PC98PLAYER - PC-9801 game player"
+      VALUE "FileVersion", "ver " PC98P_VER_STR
+      VALUE "InternalName", "PC98PLAYER"
+      VALUE "LegalCopyright", "MIT License"
+      VALUE "OriginalFilename", "PC98PLAYER.EXE"
+      VALUE "ProductName", "PC98PLAYER"
+      VALUE "ProductVersion", "ver " PC98P_VER_STR
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x411, 1200
+  END
+END

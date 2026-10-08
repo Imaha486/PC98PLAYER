@@ -169,6 +169,7 @@ struct PcmSample { uint64_t tick; int16_t l, r; };
     bool     ems = true;             // EMM386 相当（LIM EMS 4.0、ページフレーム D000h）
     int      ems_kb = 4096;
     int      xms_kb = 8192;          // HIMEM.SYS 相当（XMS 3.0）。0 で無し
+    int      ext_kb = 8192;          // 拡張メモリ（1MB より上の RAM。BIOS の 0401h に見せ、自前で保護モードに入るソフトが使う）。0 で無し
 };
 
 // マウスの状態（バスマウス）
@@ -204,7 +205,8 @@ struct MouseDrv {
 
 struct Machine {
     Cpu      cpu;
-    uint8_t* ram;               // PC98_RAM_SIZE
+    uint8_t* ram;               // ram_size バイト（1MB + 拡張メモリ。少なくとも PC98_RAM_SIZE）
+    uint32_t ram_size;
     uint8_t  tvram[0x4000];
     uint8_t  gvram[2][4][0x8000];
 

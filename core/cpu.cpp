@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // -----------------------------------------------------------------------------
-//  cpu.cpp  --  i386 リアルモード命令インタプリタ
+//  cpu.cpp  --  i386 命令インタプリタ（リアルモードと、特権の検査を省いた保護モード）
 //
 //  GMPV3 Studio の 8086 コアを出発点に、ゲーム本体を動かすのに要る範囲へ
 //  広げたもの。追加したのは次のとおり。
@@ -15,6 +15,7 @@
 #include "memio.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <vector>
 #include <string>
 void plog(const char* fmt, ...);
@@ -30,7 +31,7 @@ static uint8_t  s_parity[256];
 
 // ---- 命令ごとのデコード状態 -------------------------------------------------
 static int      d_seg;        // セグメント上書き（-1 = なし）
-static bool     d_o32, d_a32;
+static bool     d_a32;
 static int      d_rep;        // 0 / 0xF2 / 0xF3
 static uint8_t  d_mod, d_reg, d_rm;
 static bool     d_isreg;
@@ -44,14 +45,25 @@ static uint32_t s_moffs;        // MOV AL/AX,[moffs] の番地
 #define MASK(sz) ((sz) == 32 ? 0xFFFFFFFFu : ((1u << (sz)) - 1u))
 #define SIGN(sz) (1u << ((sz) - 1))
 
-static inline uint32_t sbase(int s) { return (uint32_t)C->sr[s] << 4; }
+// セグメントのベース: 記述子キャッシュが今のセレクタのものならそれ、違えば（リアルモードで
+// HLE 側が直接書き換えた）セレクタ *16
+static inline uint32_t sbase(int s) { return C->sr[s] == C->csel[s] ? C->cbase[s] : (uint32_t)C->sr[s] << 4; }
+static inline bool pmode() { return (C->cr0 & 1) != 0; }
+static inline bool cs32() { return C->sr[CS_] == C->csel[CS_] && C->cbig[CS_]; }
+static inline bool ss32() { return C->sr[SS_] == C->csel[SS_] && C->cbig[SS_]; }
+static bool     s_cs32;       // 実行中の命令のコードが 32 ビットか（命令の頭で決める）
+static inline uint32_t ipmask() { return s_cs32 ? 0xFFFFFFFFu : 0xFFFFu; }
+static bool d_o32;
+static inline int vsz_of() { return d_o32 ? 32 : 16; }
 
 // ---- フェッチ ---------------------------------------------------------------
 static inline uint8_t f8() {
     uint8_t v = mem_rb(M, sbase(CS_) + C->ip);
-    C->ip = (uint16_t)(C->ip + 1);
+    C->ip = (C->ip + 1) & ipmask();
     return v;
 }
+// 近い分岐の行き先（オペランドサイズが 16 ならば上位を落とす）
+static inline void setip(uint32_t v) { C->ip = (d_o32 ? v : (v & 0xFFFF)) & ipmask(); }
 static inline uint16_t f16() { uint16_t lo = f8(); return (uint16_t)(lo | (f8() << 8)); }
 static inline uint32_t f32() { uint32_t lo = f16(); return lo | ((uint32_t)f16() << 16); }
 static inline uint32_t fimm(int sz) { return sz == 8 ? f8() : sz == 16 ? f16() : f32(); }
@@ -246,44 +258,170 @@ static uint32_t shift(int op, uint32_t a, int cnt, int sz) {
 }
 
 // ---- スタック ----------------------------------------------------------------
+// スタックポインタ（SS の B ビットが立っていれば ESP、そうでなければ SP）
+static inline uint32_t sp_get() { return ss32() ? C->r[ESP] : (C->r[ESP] & 0xFFFF); }
+static inline void sp_set(uint32_t v) { if (ss32()) C->r[ESP] = v; else C->r[ESP] = (C->r[ESP] & 0xFFFF0000u) | (v & 0xFFFF); }
+static inline void sp_add(int32_t n) { sp_set(sp_get() + (uint32_t)n); }
 static inline void push16(uint16_t v) {
-    uint16_t sp = (uint16_t)(C->r[ESP] - 2);
-    C->r[ESP] = (C->r[ESP] & 0xFFFF0000u) | sp;
+    uint32_t sp = sp_get() - 2; sp_set(sp); sp = sp_get();
     uint32_t fx = g_side_fx;   // スタックへの積み下ろしは空回りの判定に数えない（戻れば同じ状態）
     mem_ww(M, sbase(SS_) + sp, v);
     g_side_fx = fx;
 }
 static inline void push32(uint32_t v) {
-    uint16_t sp = (uint16_t)(C->r[ESP] - 4);
-    C->r[ESP] = (C->r[ESP] & 0xFFFF0000u) | sp;
+    uint32_t sp = sp_get() - 4; sp_set(sp); sp = sp_get();
     uint32_t fx = g_side_fx;
     mem_wd(M, sbase(SS_) + sp, v);
     g_side_fx = fx;
 }
 static inline uint16_t pop16() {
-    uint16_t sp = (uint16_t)C->r[ESP];
+    uint32_t sp = sp_get();
     uint16_t v = mem_rw(M, sbase(SS_) + sp);
-    C->r[ESP] = (C->r[ESP] & 0xFFFF0000u) | (uint16_t)(sp + 2);
+    sp_set(sp + 2);
     return v;
 }
 static inline uint32_t pop32() {
-    uint16_t sp = (uint16_t)C->r[ESP];
+    uint32_t sp = sp_get();
     uint32_t v = mem_rd(M, sbase(SS_) + sp);
-    C->r[ESP] = (C->r[ESP] & 0xFFFF0000u) | (uint16_t)(sp + 4);
+    sp_set(sp + 4);
     return v;
 }
 static inline void pushv(uint32_t v) { if (d_o32) push32(v); else push16((uint16_t)v); }
 static inline uint32_t popv() { return d_o32 ? pop32() : pop16(); }
 
+// ---- 保護モードの記述子 ---------------------------------------------------------
+#define FL_NT 0x4000u
+#define FL_VM 0x20000u
+static int s_pm_logs = 0;
+static void pm_log(const char* fmt, ...) {
+    if (s_pm_logs >= 200) return;
+    s_pm_logs++;
+    char buf[300];
+    va_list ap; va_start(ap, fmt); vsnprintf(buf, sizeof(buf), fmt, ap); va_end(ap);
+    plog("[cpu] %04X:%08X %s\n", C->op_cs, C->op_ip, buf);
+}
+struct Desc { uint32_t base, limit, addr; uint8_t access, flags; uint16_t w0, w1, w3; };
+static bool read_desc(uint16_t sel, Desc* d) {
+    uint32_t tb = (sel & 4) ? C->ldt_base : C->gdt_base;
+    uint32_t tl = (sel & 4) ? C->ldt_limit : C->gdt_limit;
+    uint32_t idx = sel & ~7u;
+    if (idx + 7 > tl) return false;
+    uint32_t a = tb + idx;
+    uint8_t b[8];
+    for (int i = 0; i < 8; i++) b[i] = mem_rb(M, a + i);
+    d->limit = b[0] | (b[1] << 8) | ((uint32_t)(b[6] & 0x0F) << 16);
+    if (b[6] & 0x80) d->limit = (d->limit << 12) | 0xFFF;
+    d->base = b[2] | (b[3] << 8) | ((uint32_t)b[4] << 16) | ((uint32_t)b[7] << 24);
+    d->access = b[5]; d->flags = b[6]; d->addr = a;
+    d->w0 = (uint16_t)(b[0] | (b[1] << 8)); d->w1 = (uint16_t)(b[2] | (b[3] << 8)); d->w3 = (uint16_t)(b[6] | (b[7] << 8));
+    return true;
+}
+static inline void set_cache(int s, uint16_t sel, uint32_t base, uint32_t limit, bool big) {
+    C->sr[s] = sel; C->csel[s] = sel; C->cbase[s] = base; C->climit[s] = limit; C->cbig[s] = big ? 1 : 0;
+}
+static inline void load_seg_real(int s, uint16_t sel) {
+    // リアルモードでの読み込み: ベースだけ変わる（CS/SS は 16 ビットに戻す）
+    C->sr[s] = sel; C->csel[s] = sel; C->cbase[s] = (uint32_t)sel << 4;
+    if (s == CS_ || s == SS_) { C->cbig[s] = 0; C->climit[s] = 0xFFFF; }
+}
+static void exception(uint8_t vec, int err);
+// データ用・スタック用のセグメントレジスタへの読み込み。失敗（例外）なら false
+static bool load_seg(int s, uint16_t sel) {
+    if (!pmode()) { load_seg_real(s, sel); return true; }
+    if ((sel & ~3u) == 0) {
+        if (s == SS_) { pm_log("SS にヌルセレクタ"); exception(13, 0); return false; }
+        set_cache(s, sel, 0, 0, false); return true;
+    }
+    Desc d;
+    if (!read_desc(sel, &d)) { pm_log("セレクタ %04X が表の外（seg %d）", sel, s); exception(13, sel & ~3); return false; }
+    if (!(d.access & 0x80)) { pm_log("セレクタ %04X が無い（seg %d）", sel, s); exception(s == SS_ ? 12 : 11, sel & ~3); return false; }
+    if (!(d.access & 1)) mem_wb(M, d.addr + 5, (uint8_t)(d.access | 1));
+    set_cache(s, sel, d.base, d.limit, (d.flags & 0x40) != 0);
+    return true;
+}
+static inline int cpl() { return pmode() ? (C->sr[CS_] & 3) : 0; }
+
+// CS:EIP へ移る（far JMP/CALL/RET/IRET・割込み）。call gate を通るときは行き先を書き換える
+static bool load_cs(uint16_t sel, uint32_t off, bool is_call_or_jmp) {
+    if (!pmode()) { load_seg_real(CS_, sel); C->ip = off & 0xFFFF; return true; }
+    if ((sel & ~3u) == 0) { pm_log("CS にヌルセレクタ"); exception(13, 0); return false; }
+    Desc d;
+    if (!read_desc(sel, &d)) { pm_log("CS のセレクタ %04X が表の外", sel); exception(13, sel & ~3); return false; }
+    if (!(d.access & 0x10)) {                      // システム記述子
+        uint8_t type = d.access & 0x0F;
+        if (is_call_or_jmp && (type == 0x04 || type == 0x0C)) {   // call gate
+            uint16_t tsel = d.w1;
+            uint32_t toff = d.w0 | (type == 0x0C ? ((uint32_t)d.w3 << 16) : 0);
+            return load_cs(tsel, toff, false);
+        }
+        pm_log("CS へのシステム記述子（種類 %X）は未対応", type);
+        exception(13, sel & ~3); return false;
+    }
+    if (!(d.access & 0x08)) { pm_log("CS にデータセグメント %04X", sel); exception(13, sel & ~3); return false; }
+    if (!(d.access & 0x80)) { pm_log("CS %04X が無い", sel); exception(11, sel & ~3); return false; }
+    if (!(d.access & 1)) mem_wb(M, d.addr + 5, (uint8_t)(d.access | 1));
+    bool big = (d.flags & 0x40) != 0;
+    set_cache(CS_, sel, d.base, d.limit, big);
+    C->ip = big ? off : (off & 0xFFFF);
+    return true;
+}
+
 // ---- 割込み ------------------------------------------------------------------
-static void do_int(uint8_t vec) {
+static void do_int_real(uint8_t vec) {
     push16((uint16_t)(C->fl | 0x0002));
     push16(C->sr[CS_]);
-    push16(C->ip);
+    push16((uint16_t)C->ip);
     C->fl &= ~(FL_IF | FL_TF);
-    C->ip     = mem_rw(M, vec * 4u);
-    C->sr[CS_] = mem_rw(M, vec * 4u + 2);
+    uint32_t a = C->idt_base + vec * 4u;
+    uint16_t ip = mem_rw(M, a);
+    load_seg_real(CS_, mem_rw(M, a + 2));
+    C->ip = ip;
     d_cyc += 40;
+}
+static int s_int_depth = 0;
+// 保護モードの割込み・例外（IDT のゲートを通る）。err < 0 はエラーコード無し
+static void do_int_pm(uint8_t vec, int err) {
+    if (++s_int_depth > 3) { pm_log("例外の処理中に例外（INT %02X）。CPU を止めます", vec); C->halted = 1; C->fl &= ~FL_IF; s_int_depth--; return; }
+    d_cyc += 60;
+    if (vec * 8u + 7 > C->idt_limit) { pm_log("IDT の外の割込み %02X", vec); s_int_depth--; exception(13, vec * 8 + 2); return; }
+    uint32_t a = C->idt_base + vec * 8u;
+    uint16_t off_lo = mem_rw(M, a), sel = mem_rw(M, a + 2), off_hi = mem_rw(M, a + 6);
+    uint8_t acc = mem_rb(M, a + 5);
+    uint8_t type = acc & 0x1F;
+    if (!(acc & 0x80)) { pm_log("割込み %02X のゲートが無い", vec); s_int_depth--; exception(11, vec * 8 + 2); return; }
+    bool g32;
+    if (type == 0x0E || type == 0x0F) g32 = true;
+    else if (type == 0x06 || type == 0x07) g32 = false;
+    else { pm_log("割込み %02X のゲートの種類 %X は未対応（タスクゲートなど）", vec, type); s_int_depth--; C->halted = 1; return; }
+    uint32_t off = off_lo | (g32 ? ((uint32_t)off_hi << 16) : 0);
+    Desc cd;
+    if (!read_desc(sel, &cd)) { pm_log("割込み %02X の行き先 %04X が表の外", vec, sel); s_int_depth--; exception(13, sel & ~3); return; }
+    int dpl = (cd.access >> 5) & 3, oldcpl = cpl();
+    uint32_t ofl = C->fl, oip = C->ip, oesp = C->r[ESP];
+    uint16_t ocs = C->sr[CS_], oss = C->sr[SS_];
+    if (cd.access & 0x04) dpl = oldcpl;              // conforming: 特権は変わらない
+    if (dpl < oldcpl) {                               // 内側のリングのスタックへ（TSS から）
+        uint16_t nss; uint32_t nesp;
+        bool tss32 = (C->tr_limit >= 0x67);
+        if (tss32) { nesp = mem_rd(M, C->tr_base + 4 + dpl * 8u); nss = mem_rw(M, C->tr_base + 8 + dpl * 8u); }
+        else { nesp = mem_rw(M, C->tr_base + 2 + dpl * 4u); nss = mem_rw(M, C->tr_base + 4 + dpl * 4u); }
+        if (!load_seg(SS_, nss)) { s_int_depth--; return; }
+        C->r[ESP] = ss32() ? nesp : ((C->r[ESP] & 0xFFFF0000u) | (nesp & 0xFFFF));
+        if (g32) { push32(oss); push32(oesp); } else { push16(oss); push16((uint16_t)oesp); }
+    }
+    if (g32) { push32(ofl); push32(ocs); push32(oip); if (err >= 0) push32((uint32_t)err); }
+    else { push16((uint16_t)ofl); push16(ocs); push16((uint16_t)oip); if (err >= 0) push16((uint16_t)err); }
+    C->fl &= ~(FL_TF | FL_NT | FL_VM | 0x10000u);
+    if (!(type & 1)) C->fl &= ~FL_IF;                // 割込みゲートは IF を落とす（トラップゲートは落とさない）
+    if (!(cd.access & 0x80)) { pm_log("割込み %02X の行き先 %04X が無い", vec, sel); }
+    if (!(cd.access & 1)) mem_wb(M, cd.addr + 5, (uint8_t)(cd.access | 1));
+    bool big = (cd.flags & 0x40) != 0;
+    set_cache(CS_, (uint16_t)((sel & ~3u) | (uint16_t)dpl), cd.base, cd.limit, big);
+    C->ip = big ? off : (off & 0xFFFF);
+    s_int_depth--;
+}
+static void do_int(uint8_t vec) {
+    if (pmode()) do_int_pm(vec, -1); else do_int_real(vec);
 }
 void cpu_interrupt(Cpu* c, uint8_t vec) {
     Cpu* sc = C; Machine* sm = M;
@@ -292,11 +430,22 @@ void cpu_interrupt(Cpu* c, uint8_t vec) {
     C = sc; M = sm;
     if (!C) { C = c; M = c->m; }
 }
-static void fault(uint8_t vec) {        // 386 流：戻り先は命令の先頭
+// 例外（386 流：戻り先は命令の先頭）
+static void exception(uint8_t vec, int err) {
     C->ip = C->op_ip;
-    C->sr[CS_] = C->op_cs;
-    do_int(vec);
+    if (C->sr[CS_] != C->op_cs && pmode()) {         // 命令の途中で CS が変わっていたら戻す
+        Desc d;
+        if (read_desc(C->op_cs, &d)) set_cache(CS_, C->op_cs, d.base, d.limit, (d.flags & 0x40) != 0);
+    }
+    if (pmode()) {
+        bool has_err = vec == 8 || (vec >= 10 && vec <= 14) || vec == 17;
+        do_int_pm(vec, has_err ? (err < 0 ? 0 : err) : -1);
+    } else {
+        if (C->sr[CS_] != C->op_cs) load_seg_real(CS_, C->op_cs);
+        do_int_real(vec);
+    }
 }
+static void fault(uint8_t vec) { exception(vec, 0); }
 
 static void set_flags_word(uint32_t v, bool is32) {
     // 386 リアルモード: IOPL/NT は書ける、bit15 は 0、bit1 は 1。
@@ -471,9 +620,51 @@ static void load_far(int sreg, int sz) {   // LES/LDS/LSS/LFS/LGS
     if (d_isreg) { fault(6); return; }
     uint32_t off = rdm(sz, d_ea);
     uint16_t seg = mem_rw(M, d_ea + sz / 8);
+    if (!load_seg(sreg, seg)) return;
     setr(sz, d_reg, off);
-    C->sr[sreg] = seg;
     if (sreg == SS_) C->inhibit_irq = 1;
+}
+
+// ---- 遠い分岐 ------------------------------------------------------------------
+static void far_call(uint16_t sel, uint32_t off) {
+    uint16_t ocs = C->sr[CS_]; uint32_t oip = C->ip;
+    pushv(ocs); pushv(oip);
+    load_cs(sel, off, true);
+}
+static void far_ret(uint32_t n) {
+    uint32_t ip = popv(); uint16_t cs = (uint16_t)popv();
+    if (pmode() && (cs & 3) > cpl()) {               // 外側のリングへ戻る: SS:ESP も取り出す
+        sp_add((int32_t)n);
+        uint32_t esp = popv(); uint16_t ss = (uint16_t)popv();
+        if (!load_cs(cs, ip, false)) return;
+        if (!load_seg(SS_, ss)) return;
+        if (ss32()) C->r[ESP] = esp; else C->r[ESP] = (C->r[ESP] & 0xFFFF0000u) | (esp & 0xFFFF);
+        return;
+    }
+    if (!load_cs(cs, ip, false)) return;
+    sp_add((int32_t)n);
+}
+static void set_flags_word(uint32_t v, bool is32);
+static void iret_op() {
+    if (!pmode()) {
+        uint32_t ip = popv(); uint16_t cs = (uint16_t)popv(); uint32_t fl = popv();
+        load_seg_real(CS_, cs); C->ip = ip & 0xFFFF;
+        set_flags_word(fl, d_o32);
+        return;
+    }
+    if (C->fl & FL_NT) pm_log("タスクへの IRET（NT=1）は未対応");
+    int oc = cpl();
+    uint32_t ip = popv(); uint16_t cs = (uint16_t)popv(); uint32_t fl = popv();
+    if (d_o32 && (fl & FL_VM) && oc == 0) pm_log("仮想 86 モードへの IRET は未対応");
+    bool outer = (cs & 3) > oc;
+    uint32_t esp = 0; uint16_t ss = 0;
+    if (outer) { esp = popv(); ss = (uint16_t)popv(); }
+    if (!load_cs(cs, ip, false)) return;
+    set_flags_word(fl, d_o32);
+    if (outer) {
+        if (!load_seg(SS_, ss)) return;
+        if (ss32()) C->r[ESP] = esp; else C->r[ESP] = (C->r[ESP] & 0xFFFF0000u) | (esp & 0xFFFF);
+    }
 }
 
 static void undefined(uint8_t op, uint8_t op2) {
@@ -490,7 +681,7 @@ static void op0f() {
     int sz = d_o32 ? 32 : 16;
     if (op >= 0x80 && op <= 0x8F) {
         int32_t disp = d_o32 ? (int32_t)f32() : (int16_t)f16();
-        if (cond(op & 15)) { C->ip = (uint16_t)(C->ip + disp); d_cyc += 4; }
+        if (cond(op & 15)) { setip(C->ip + (uint32_t)disp); d_cyc += 4; }
         return;
     }
     if (op >= 0x90 && op <= 0x9F) { modrm(); rmw(8, cond(op & 15) ? 1 : 0); return; }
@@ -500,28 +691,79 @@ static void op0f() {
         return;
     }
     switch (op) {
+    case 0x00: {
+        modrm();
+        if (!pmode()) { undefined(0x0F, 0x00); return; }
+        switch (d_reg) {
+        case 0: if (d_isreg) setr(vsz_of(), d_rm, C->ldtr); else wrm(16, d_ea, C->ldtr); return;   // SLDT
+        case 1: if (d_isreg) setr(vsz_of(), d_rm, C->tr); else wrm(16, d_ea, C->tr); return;       // STR
+        case 2: {                                                                                   // LLDT
+            uint16_t sel = (uint16_t)rmr(16);
+            if ((sel & ~3u) == 0) { C->ldtr = sel; C->ldt_base = 0; C->ldt_limit = 0; return; }
+            Desc d; if (!read_desc(sel & ~4u, &d)) { pm_log("LLDT %04X が表の外", sel); exception(13, sel & ~3); return; }
+            C->ldtr = sel; C->ldt_base = d.base; C->ldt_limit = d.limit; return; }
+        case 3: {                                                                                   // LTR
+            uint16_t sel = (uint16_t)rmr(16);
+            Desc d; if (!read_desc(sel & ~4u, &d)) { pm_log("LTR %04X が表の外", sel); exception(13, sel & ~3); return; }
+            C->tr = sel; C->tr_base = d.base; C->tr_limit = d.limit;
+            mem_wb(M, d.addr + 5, (uint8_t)(d.access | 2));      // ビジー
+            return; }
+        case 4: case 5: {                                                                           // VERR / VERW
+            uint16_t sel = (uint16_t)rmr(16);
+            Desc d; bool ok = (sel & ~3u) && read_desc(sel, &d) && (d.access & 0x10);
+            if (ok) ok = d_reg == 4 ? (!(d.access & 8) || (d.access & 2)) : (!(d.access & 8) && (d.access & 2));
+            if (ok) C->fl |= FL_ZF; else C->fl &= ~FL_ZF;
+            return; }
+        }
+        undefined(0x0F, 0x00); return; }
     case 0x01: {
         modrm();
         switch (d_reg) {
+        case 0: case 1: {                                                  // SGDT / SIDT
+            if (d_isreg) { undefined(0x0F, 0x01); return; }
+            uint16_t lim = d_reg == 0 ? C->gdt_limit : C->idt_limit;
+            uint32_t base = d_reg == 0 ? C->gdt_base : C->idt_base;
+            wrm(16, d_ea, lim); wrm(32, d_ea + 2, d_o32 ? base : (base & 0xFFFFFF) | 0xFF000000u);
+            return; }
+        case 2: case 3: {                                                  // LGDT / LIDT
+            if (d_isreg) { undefined(0x0F, 0x01); return; }
+            uint16_t lim = (uint16_t)rdm(16, d_ea);
+            uint32_t base = rdm(32, d_ea + 2);
+            if (!d_o32) base &= 0xFFFFFF;
+            if (d_reg == 2) { C->gdt_limit = lim; C->gdt_base = base; } else { C->idt_limit = lim; C->idt_base = base; }
+            return; }
         case 4: rmw(16, C->cr0 & 0xFFFF); return;                       // SMSW
-        case 6: { uint16_t v = (uint16_t)rmr(16);                         // LMSW
-                  if (v & 1) fprintf(stderr, "[cpu] 保護モードへの移行は未対応です (LMSW)\n");
-                  C->cr0 = (C->cr0 & ~0xEu) | (v & 0xE); return; }
-        default: return;   // LGDT/LIDT/SGDT/SIDT: 記録不要
-        } }
-    case 0x06: C->cr0 &= ~8u; return;                                     // CLTS
-    case 0x20: { modrm(); C->r[d_rm] = d_reg == 0 ? C->cr0 : 0; return; }   // MOV r32,CRn
-    case 0x22: { modrm();
-        if (d_reg == 0) {
-            if (C->r[d_rm] & 1) fprintf(stderr, "[cpu] 保護モードへの移行は未対応です (MOV CR0)\n");
-            C->cr0 = (C->r[d_rm] & ~1u) | 0x10;
+        case 6: { uint16_t v = (uint16_t)rmr(16);                         // LMSW（PE は立てられるが落とせない）
+                  C->cr0 = (C->cr0 & ~0xEu) | (v & 0xF) | (C->cr0 & 1); return; }
+        case 7: return;                                                   // INVLPG
         }
+        undefined(0x0F, 0x01); return; }
+    case 0x02: case 0x03: {                                               // LAR / LSL
+        modrm();
+        if (!pmode()) { undefined(0x0F, op); return; }
+        uint16_t sel = (uint16_t)rmr(16);
+        Desc d;
+        if (!(sel & ~3u) || !read_desc(sel, &d)) { C->fl &= ~FL_ZF; return; }
+        if (op == 0x02) setr(sz, d_reg, ((uint32_t)d.access << 8) | ((uint32_t)(d.flags & 0xF0) << 16));
+        else setr(sz, d_reg, d.limit);
+        C->fl |= FL_ZF;
+        return; }
+    case 0x06: C->cr0 &= ~8u; return;                                     // CLTS
+    case 0x20: { modrm(); C->r[d_rm] = d_reg == 0 ? C->cr0 : d_reg == 2 ? C->cr2 : d_reg == 3 ? C->cr3 : 0; return; }   // MOV r32,CRn
+    case 0x22: { modrm();
+        uint32_t v = C->r[d_rm];
+        if (d_reg == 0) {
+            if ((v & 1) && !(C->cr0 & 1)) { static int n = 0; if (n++ < 4) plog("[cpu] 保護モードへ切り替え（%04X:%04X）\n", C->op_cs, C->op_ip); }
+            if (v & 0x80000000u) pm_log("ページングは未対応（CR0.PG を無視）");
+            C->cr0 = (v & ~0x80000000u) | 0x10;
+        } else if (d_reg == 2) C->cr2 = v;
+        else if (d_reg == 3) C->cr3 = v;
         return; }
     case 0x21: case 0x23: modrm(); if (op == 0x21) C->r[d_rm] = 0; return;   // DRn
     case 0xA0: pushv(C->sr[FS_]); return;
-    case 0xA1: C->sr[FS_] = (uint16_t)popv(); return;
+    case 0xA1: { uint32_t sp0 = sp_get(); uint16_t v = (uint16_t)popv(); if (!load_seg(FS_, v)) sp_set(sp0); return; }
     case 0xA8: pushv(C->sr[GS_]); return;
-    case 0xA9: C->sr[GS_] = (uint16_t)popv(); return;
+    case 0xA9: { uint32_t sp0 = sp_get(); uint16_t v = (uint16_t)popv(); if (!load_seg(GS_, v)) sp_set(sp0); return; }
     case 0xA3: case 0xAB: case 0xB3: case 0xBB: {                          // BT/BTS/BTR/BTC r
         modrm();
         int32_t bit = (int32_t)getr(sz, d_reg);
@@ -621,8 +863,9 @@ static void step() {
     }
     if (s_tr_on && C->ip == s_tr_ip && C->sr[CS_] == s_tr_cs) { s_tr_on = 0; fprintf(stderr, "   -> AX=%04X BX=%04X CX=%04X DX=%04X FL=%04X\n", C->r[EAX] & 0xFFFF, C->r[EBX] & 0xFFFF, C->r[ECX] & 0xFFFF, C->r[EDX] & 0xFFFF, C->fl & 0xFFFF); }
     C->op_ip = C->ip; C->op_cs = C->sr[CS_];
-    if (g_prof) { if (g_prof_cs == -2) g_prof[C->sr[CS_]]++; else if (C->sr[CS_] == g_prof_cs) g_prof[C->ip]++; }
-    d_seg = -1; d_o32 = false; d_a32 = false; d_rep = 0;
+    if (g_prof) { if (g_prof_cs == -2) g_prof[C->sr[CS_]]++; else if (C->sr[CS_] == g_prof_cs) g_prof[C->ip & 0xFFFF]++; }
+    s_cs32 = cs32();
+    d_seg = -1; d_o32 = s_cs32; d_a32 = s_cs32; d_rep = 0;
     d_cyc = 2;
     uint8_t op;
     for (;;) {
@@ -634,8 +877,8 @@ static void step() {
         case 0x3E: d_seg = DS_; continue;
         case 0x64: d_seg = FS_; continue;
         case 0x65: d_seg = GS_; continue;
-        case 0x66: d_o32 = true; continue;
-        case 0x67: d_a32 = true; continue;
+        case 0x66: d_o32 = !s_cs32; continue;
+        case 0x67: d_a32 = !s_cs32; continue;
         case 0xF0: continue;
         case 0xF2: case 0xF3: d_rep = op; continue;
         }
@@ -657,13 +900,13 @@ static void step() {
 
     switch (op) {
     case 0x06: pushv(C->sr[ES_]); return;
-    case 0x07: C->sr[ES_] = (uint16_t)popv(); return;
+    case 0x07: { uint32_t sp0 = sp_get(); uint16_t v = (uint16_t)popv(); if (!load_seg(ES_, v)) sp_set(sp0); return; }
     case 0x0E: pushv(C->sr[CS_]); return;
     case 0x0F: op0f(); return;
     case 0x16: pushv(C->sr[SS_]); return;
-    case 0x17: C->sr[SS_] = (uint16_t)popv(); C->inhibit_irq = 1; return;
+    case 0x17: { uint32_t sp0 = sp_get(); uint16_t v = (uint16_t)popv(); if (!load_seg(SS_, v)) { sp_set(sp0); return; } C->inhibit_irq = 1; return; }
     case 0x1E: pushv(C->sr[DS_]); return;
-    case 0x1F: C->sr[DS_] = (uint16_t)popv(); return;
+    case 0x1F: { uint32_t sp0 = sp_get(); uint16_t v = (uint16_t)popv(); if (!load_seg(DS_, v)) sp_set(sp0); return; }
     case 0x27: case 0x2F: {   // DAA / DAS
         uint8_t al = (uint8_t)C->r[EAX], old = al;
         bool cf = C->fl & FL_CF, af = C->fl & FL_AF;
@@ -694,7 +937,7 @@ static void step() {
         pushv(v); return;
     }
     if (op >= 0x58 && op <= 0x5F) { uint32_t v = popv(); setr(vsz, op & 7, v); return; }
-    if (op >= 0x70 && op <= 0x7F) { int8_t d = (int8_t)f8(); if (cond(op & 15)) { C->ip = (uint16_t)(C->ip + d); d_cyc += 4; } return; }
+    if (op >= 0x70 && op <= 0x7F) { int8_t d = (int8_t)f8(); if (cond(op & 15)) { setip(C->ip + (uint32_t)(int32_t)d); d_cyc += 4; } return; }
     if (op >= 0x91 && op <= 0x97) { uint32_t a = getr(vsz, EAX); setr(vsz, EAX, getr(vsz, op & 7)); setr(vsz, op & 7, a); return; }
     if (op >= 0xB0 && op <= 0xB7) { setr(8, op & 7, f8()); return; }
     if (op >= 0xB8 && op <= 0xBF) { setr(vsz, op & 7, fimm(vsz)); return; }
@@ -708,6 +951,13 @@ static void step() {
     case 0x61: {  // POPA
         for (int i = 7; i >= 0; i--) { uint32_t v = popv(); if (i != ESP) setr(vsz, i, v); }
         d_cyc += 16; return; }
+    case 0x63: {  // ARPL（保護モードのみ）
+        modrm();
+        if (!pmode()) { undefined(op, 0); return; }
+        uint16_t dst = (uint16_t)rmr(16), src = (uint16_t)getr(16, d_reg);
+        if ((dst & 3) < (src & 3)) { rmw(16, (uint16_t)((dst & ~3u) | (src & 3))); C->fl |= FL_ZF; }
+        else C->fl &= ~FL_ZF;
+        return; }
     case 0x62: {  // BOUND
         modrm();
         int32_t idx = vsz == 16 ? (int16_t)getr(16, d_reg) : (int32_t)C->r[d_reg];
@@ -737,7 +987,7 @@ static void step() {
     case 0x8C: modrm(); if (d_isreg) setr(vsz, d_rm, C->sr[d_reg % 6]); else wrm(16, d_ea, C->sr[d_reg % 6]); return;
     case 0x8D: modrm(); setr(vsz, d_reg, d_a32 ? d_off : (d_off & 0xFFFF)); return;
     case 0x8E: { modrm(); int s = d_reg % 6; if (s == CS_) { undefined(op, 0x8E); return; }
-                 C->sr[s] = (uint16_t)rmr(16); if (s == SS_) C->inhibit_irq = 1; return; }
+                 if (!load_seg(s, (uint16_t)rmr(16))) return; if (s == SS_) C->inhibit_irq = 1; return; }
     case 0x8F: { // POP rm: ESP を先に進めてからアドレス計算する（実機どおり）
         uint32_t v = popv();
         modrm(); rmw(vsz, v); return; }
@@ -746,8 +996,7 @@ static void step() {
     case 0x99: if (d_o32) C->r[EDX] = (C->r[EAX] & 0x80000000u) ? 0xFFFFFFFFu : 0; else setr(16, EDX, (C->r[EAX] & 0x8000) ? 0xFFFF : 0); return;
     case 0x9A: {
         uint32_t off = fimm(vsz); uint16_t seg = f16();
-        pushv(C->sr[CS_]); pushv(C->ip);
-        C->sr[CS_] = seg; C->ip = (uint16_t)off; d_cyc += 10; return; }
+        far_call(seg, off); d_cyc += 10; return; }
     case 0x9B: return;
     case 0x9C: if (d_o32) push32(C->fl & 0x00FCFFFFu); else push16((uint16_t)C->fl); return;
     case 0x9D: { uint32_t v = popv(); set_flags_word(v, d_o32); return; }
@@ -772,8 +1021,8 @@ static void step() {
         uint32_t r = shift(d_reg, v, cnt, sz);
         if (cnt & 0x1F) rmw(sz, r);
         return; }
-    case 0xC2: { uint16_t n = f16(); C->ip = (uint16_t)popv(); C->r[ESP] = (C->r[ESP] & 0xFFFF0000u) | (uint16_t)(C->r[ESP] + n); d_cyc += 8; return; }
-    case 0xC3: C->ip = (uint16_t)popv(); d_cyc += 8; return;
+    case 0xC2: { uint16_t n = f16(); setip(popv()); sp_add(n); d_cyc += 8; return; }
+    case 0xC3: setip(popv()); d_cyc += 8; return;
     case 0xC4: load_far(ES_, vsz); return;
     case 0xC5: load_far(DS_, vsz); return;
     case 0xC6: modrm(); rmw(8, f8()); return;
@@ -781,32 +1030,30 @@ static void step() {
     case 0xC8: {  // ENTER
         uint16_t size = f16(); uint8_t lvl = f8() & 31;
         uint32_t fp;
+        bool s32 = ss32();
         pushv(getr(vsz, EBP));
-        fp = C->r[ESP] & 0xFFFF;
+        fp = sp_get();
         if (lvl) {
             for (int i = 1; i < lvl; i++) {
-                uint16_t bp = (uint16_t)(C->r[EBP] - (vsz / 8) * i);
+                uint32_t bp = C->r[EBP] - (uint32_t)((vsz / 8) * i);
+                if (!s32) bp &= 0xFFFF;
                 pushv(rdm(vsz, sbase(SS_) + bp));
             }
             pushv(fp);
         }
         setr(vsz, EBP, fp);
-        C->r[ESP] = (C->r[ESP] & 0xFFFF0000u) | (uint16_t)(C->r[ESP] - size);
+        sp_set(sp_get() - size);
         d_cyc += 10; return; }
-    case 0xC9: C->r[ESP] = (C->r[ESP] & 0xFFFF0000u) | (C->r[EBP] & 0xFFFF); setr(vsz, EBP, popv()); return;
-    case 0xCA: { uint16_t n = f16(); C->ip = (uint16_t)popv(); C->sr[CS_] = (uint16_t)popv();
-                 C->r[ESP] = (C->r[ESP] & 0xFFFF0000u) | (uint16_t)(C->r[ESP] + n); d_cyc += 12; return; }
-    case 0xCB: C->ip = (uint16_t)popv(); C->sr[CS_] = (uint16_t)popv(); d_cyc += 12; return;
+    case 0xC9: sp_set(ss32() ? C->r[EBP] : (C->r[EBP] & 0xFFFF)); setr(vsz, EBP, popv()); return;
+    case 0xCA: { uint16_t n = f16(); far_ret(n); d_cyc += 12; return; }
+    case 0xCB: far_ret(0); d_cyc += 12; return;
     case 0xCC: do_int(3); return;
     case 0xCD: { uint8_t v = f8();
         if (v == g_trace_int) { s_tr_cs = C->sr[CS_]; s_tr_ip = C->ip; s_tr_on = 1; }
         if (v == g_trace_int) fprintf(stderr, "[f%llu int %02X] AX=%04X BX=%04X CX=%04X DX=%04X DS=%04X ES=%04X from %04X:%04X\n", (unsigned long long)g_frame_dbg, v, C->r[EAX] & 0xFFFF, C->r[EBX] & 0xFFFF, C->r[ECX] & 0xFFFF, C->r[EDX] & 0xFFFF, C->sr[DS_], C->sr[ES_], C->op_cs, C->op_ip);
         do_int(v); return; }
     case 0xCE: if (C->fl & FL_OF) do_int(4); return;
-    case 0xCF: {
-        if (d_o32) { C->ip = (uint16_t)pop32(); C->sr[CS_] = (uint16_t)pop32(); set_flags_word(pop32(), true); }
-        else { C->ip = pop16(); C->sr[CS_] = pop16(); set_flags_word(pop16(), false); }
-        d_cyc += 20; return; }
+    case 0xCF: iret_op(); d_cyc += 20; return;
     case 0xD4: {  // AAM
         uint8_t base = f8();
         if (!base) { fault(0); return; }
@@ -830,17 +1077,17 @@ static void step() {
         bool go = n != 0;
         if (op == 0xE0) go = go && !(C->fl & FL_ZF);
         if (op == 0xE1) go = go && (C->fl & FL_ZF);
-        if (go) { C->ip = (uint16_t)(C->ip + d); d_cyc += 4; }
+        if (go) { setip(C->ip + (uint32_t)(int32_t)d); d_cyc += 4; }
         return; }
-    case 0xE3: { int8_t d = (int8_t)f8(); if (cx_() == 0) C->ip = (uint16_t)(C->ip + d); return; }
+    case 0xE3: { int8_t d = (int8_t)f8(); if (cx_() == 0) setip(C->ip + (uint32_t)(int32_t)d); return; }
     case 0xE4: setr(8, 0, io_in8(M, f8())); d_cyc += 8; return;
     case 0xE5: { uint8_t p = f8(); setr(vsz, EAX, vsz == 16 ? io_in16(M, p) : (io_in16(M, p) | ((uint32_t)io_in16(M, p + 2) << 16))); d_cyc += 8; return; }
     case 0xE6: io_out8(M, f8(), (uint8_t)C->r[EAX]); d_cyc += 8; return;
     case 0xE7: { uint8_t p = f8(); io_out16(M, p, (uint16_t)C->r[EAX]); if (d_o32) io_out16(M, p + 2, (uint16_t)(C->r[EAX] >> 16)); d_cyc += 8; return; }
-    case 0xE8: { int32_t d = d_o32 ? (int32_t)f32() : (int16_t)f16(); pushv(C->ip); C->ip = (uint16_t)(C->ip + d); d_cyc += 6; return; }
-    case 0xE9: { int32_t d = d_o32 ? (int32_t)f32() : (int16_t)f16(); C->ip = (uint16_t)(C->ip + d); d_cyc += 6; return; }
-    case 0xEA: { uint32_t off = fimm(vsz); uint16_t seg = f16(); C->ip = (uint16_t)off; C->sr[CS_] = seg; d_cyc += 8; return; }
-    case 0xEB: { int8_t d = (int8_t)f8(); C->ip = (uint16_t)(C->ip + d); d_cyc += 4; return; }
+    case 0xE8: { int32_t d = d_o32 ? (int32_t)f32() : (int16_t)f16(); pushv(C->ip); setip(C->ip + (uint32_t)d); d_cyc += 6; return; }
+    case 0xE9: { int32_t d = d_o32 ? (int32_t)f32() : (int16_t)f16(); setip(C->ip + (uint32_t)d); d_cyc += 6; return; }
+    case 0xEA: { uint32_t off = fimm(vsz); uint16_t seg = f16(); load_cs(seg, off, true); d_cyc += 8; return; }
+    case 0xEB: { int8_t d = (int8_t)f8(); setip(C->ip + (uint32_t)(int32_t)d); d_cyc += 4; return; }
     case 0xEC: setr(8, 0, io_in8(M, (uint16_t)C->r[EDX])); d_cyc += 8; return;
     case 0xED: { uint16_t p = (uint16_t)C->r[EDX]; setr(vsz, EAX, vsz == 16 ? io_in16(M, p) : (io_in16(M, p) | ((uint32_t)io_in16(M, p + 2) << 16))); d_cyc += 8; return; }
     case 0xEE: io_out8(M, (uint16_t)C->r[EDX], (uint8_t)C->r[EAX]); d_cyc += 8; return;
@@ -864,14 +1111,14 @@ static void step() {
         modrm();
         switch (d_reg) {
         case 0: case 1: rmw(vsz, incdec(rmr(vsz), vsz, d_reg == 1)); return;
-        case 2: { uint32_t t = rmr(vsz); pushv(C->ip); C->ip = (uint16_t)t; d_cyc += 6; return; }
+        case 2: { uint32_t t = rmr(vsz); pushv(C->ip); setip(t); d_cyc += 6; return; }
         case 3: { if (d_isreg) { undefined(op, 3); return; }
                   uint32_t off = rdm(vsz, d_ea); uint16_t seg = mem_rw(M, d_ea + vsz / 8);
-                  pushv(C->sr[CS_]); pushv(C->ip); C->sr[CS_] = seg; C->ip = (uint16_t)off; d_cyc += 12; return; }
-        case 4: C->ip = (uint16_t)rmr(vsz); d_cyc += 6; return;
+                  far_call(seg, off); d_cyc += 12; return; }
+        case 4: setip(rmr(vsz)); d_cyc += 6; return;
         case 5: { if (d_isreg) { undefined(op, 5); return; }
                   uint32_t off = rdm(vsz, d_ea); uint16_t seg = mem_rw(M, d_ea + vsz / 8);
-                  C->sr[CS_] = seg; C->ip = (uint16_t)off; d_cyc += 10; return; }
+                  load_cs(seg, off, true); d_cyc += 10; return; }
         case 6: pushv(rmr(vsz)); return;
         }
         undefined(op, 7); return; }
@@ -890,6 +1137,8 @@ void cpu_reset(Cpu* c, Machine* m) {
     c->fl = 0x0002;
     c->cr0 = 0x10;
     c->sr[CS_] = 0xF000; c->ip = 0xFFF0;
+    c->idt_base = 0; c->idt_limit = 0x3FF;
+    for (int i = 0; i < 6; i++) { c->csel[i] = c->sr[i]; c->cbase[i] = (uint32_t)c->sr[i] << 4; c->climit[i] = 0xFFFF; }
 }
 
 // ---- 空回りの見分け ------------------------------------------------------------
@@ -901,14 +1150,15 @@ void cpu_reset(Cpu* c, Machine* m) {
 int g_idle_skip = 1;
 unsigned g_spin_hits = 0;
 struct SpinSlot {
-    bool valid; uint16_t cs, ip; uint32_t fx;
+    bool valid; uint16_t cs; uint32_t ip; uint32_t fx;
     uint32_t r[8]; uint16_t sr[6]; uint32_t fl;
     uint16_t stk[8];   // スタックの先頭（戻り先）。積み下ろしは副作用に数えないので、ここで見分ける
 };
 // スタックの先頭 8 ワード（副作用の無い読み出し。メインメモリの外は 0 とみなす）
 static inline uint16_t spin_stk(int i) {
-    uint32_t a = ((uint32_t)C->sr[SS_] << 4) + (uint16_t)(C->r[ESP] + i * 2);
-    return a + 1 < 0xA0000u ? (uint16_t)(g_ram[a] | (g_ram[a + 1] << 8)) : 0;
+    uint32_t a = (sbase(SS_) + sp_get() + (uint32_t)i * 2) & g_addr_mask;
+    if (a + 1 < 0xA0000u || (a >= 0x100000u && a + 1 < g_ram_top)) return (uint16_t)(g_ram[a] | (g_ram[a + 1] << 8));
+    return 0;
 }
 static SpinSlot s_spin[8];   // ループの戻り先ごと（入れ子のループでも外側を見分けられるように）
 static inline bool spin_same(const SpinSlot& s) {
@@ -1161,11 +1411,11 @@ int cpu_run(Cpu* c, int budget) {
         }
         C->inhibit_irq = 0;
         if (C->halted) { used = budget; break; }
-        uint16_t cs0 = C->sr[CS_], ip0 = C->ip;
+        uint16_t cs0 = C->sr[CS_]; uint32_t ip0 = C->ip;
         if (DW_UNLIKELY(s_dw.active)) step_dw(); else step();
         used += d_cyc;
         // 短い後ろ向きの分岐（ループの戻り）
-        if (C->sr[CS_] == cs0 && C->ip < ip0 && (uint16_t)(ip0 - C->ip) <= 64 && g_idle_skip) {
+        if (C->sr[CS_] == cs0 && C->ip < ip0 && ip0 - C->ip <= 64 && g_idle_skip) {
             SpinSlot& sp = s_spin[(C->ip ^ (C->ip >> 3)) & 7];
             if (sp.valid && sp.cs == cs0 && sp.ip == C->ip && sp.fx == g_side_fx && spin_same(sp)) {
                 if (C->fl & FL_IF) { C->halted = 1; spin_clear(); used = budget; g_spin_hits++; break; }
