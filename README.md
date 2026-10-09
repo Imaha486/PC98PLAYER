@@ -3,8 +3,10 @@
 PC-9801 のゲームを、**インストール済みのフォルダごと** Windows 11 のアプリのように動かすプレイヤーです。
 GMPV3 Studio の「必要なデバイスの振る舞いと DOS ファンクションだけを自前で持つ小さな仮想 PC-98」を、
 音だけでなく **画面・キーボード・マウス・ファイル** まで広げたものです。
-
-![SuperDepth のプレイ画面](manual/images/ch1_sd_play.png)
+<p>
+<img src="manual/images/ch1_sd_title.png" width="320">
+<img src="manual/images/ch1_sd_play.png" width="320">
+</p>
 
 ```
 ゲームのフォルダ\
