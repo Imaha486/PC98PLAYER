@@ -4,6 +4,8 @@ PC-9801 のゲームを、**インストール済みのフォルダごと** Wind
 GMPV3 Studio の「必要なデバイスの振る舞いと DOS ファンクションだけを自前で持つ小さな仮想 PC-98」を、
 音だけでなく **画面・キーボード・マウス・ファイル** まで広げたものです。
 
+![SuperDepth のプレイ画面](manual/images/ch1_sd_play.png)
+
 ```
 ゲームのフォルダ\
     KAKYU.BAT, AI5.EXE, PLAY5.COM ...   ← PC-98 のゲーム（HDD インストール済みのもの）
