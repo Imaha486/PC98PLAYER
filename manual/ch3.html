@@ -187,7 +187,8 @@ ExitOnEnd=0</pre>
 <ul>
   <li><code>Start=B:\INSTALL.BAT</code> のようにドライブ付きで書くと、そのドライブをカレントにして実行します。<code>CurrentDrive=</code> で別のドライブをカレントにもできます。<br>「カレントドライブにインストールする」インストーラ（実機では <code>A&gt;</code> から <code>B:INSTALL</code> と打って使うもの。同級生など）は、<code>Start=B:\INSTALL.EXE</code> と <code>CurrentDrive=A</code>（ゲームのフォルダ）を一緒に書きます。書かないとカレントがフロッピーになり、「カレントドライブがハードディスクドライブではありません」と止まります。<br>説明書に「A:\NANPA を作り、そこをカレントにして実行」とあるもの（「カレントディレクトリーがルートディレクトリーです」と止まるもの）は、<code>CurrentDirectory=A:\NANPA\</code> を書きます。フォルダはゲームのフォルダの下に自動で作られ、インストール先も <code>NANPA</code> フォルダになります。遊ぶときは <code>Start=NANPA\NANPA.BAT</code> とします。</li>
   <li>フロッピーを A: にしないと動かないインストーラは、<code>Drive=B</code>・<code>FloppyDrive=A</code> のように入れ替えます。</li>
-  <li>インストーラが <code>COMMAND.COM /C COPY …</code> のように呼ぶ内部コマンド（COPY・MD・DEL など）にも対応しています。</li>
+  <li>インストーラが <code>COMMAND.COM /C COPY …</code> のように呼ぶ内部コマンド（COPY・MD・DEL・DIR など）にも対応しています。</li>
+  <li>プログラムが <code>COMMAND.COM</code> を <code>/C</code> なしで起動すると、COMMAND.COM の画面（<code>A:\&gt;</code> のプロンプト）になり、DIR・CD・COPY・DEL・REN・MD・RD・TYPE・VER などとプログラムの実行ができます。<code>EXIT</code> で呼び出し元へ戻ります（ファイラーの「シェル」など）。<code>COMMAND.COM /C</code> にバッチファイルを渡したときも、そのバッチを実行してから戻ります。</li>
   <li>インストールが終わったら、<code>Start=</code> などをゲームの起動用に書き換えます（<code>FloppyImage=</code> はキーディスクが要らなければ消します）。</li>
 </ul>
 <h3>フロッピードライブを 2 台使うインストーラ</h3>

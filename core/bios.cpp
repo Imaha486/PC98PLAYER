@@ -248,6 +248,13 @@ static void con_csi(Machine* m, char fin) {
         else con_clear_range(m, s_con.y * 80 + s_con.x, s_con.y * 80 + 80);
         break;
     case 'm': if (na == 0) con_sgr(0); for (int i = 0; i < na; i++) con_sgr(args[i] < 0 ? 0 : args[i]); break;
+    case 'n':
+        if (a0 == 6 && !priv) {   // カーソル位置の報告: ESC[行;桁R を入力に返す（画面の行数を調べるソフトが使う）
+            extern void dos_con_inject(const char* s);
+            char rep[24]; snprintf(rep, sizeof(rep), "\x1b[%d;%dR", s_con.y + 1, s_con.x + 1);
+            dos_con_inject(rep);
+        }
+        break;
     case 's': s_con.sx = s_con.x; s_con.sy = s_con.y; break;
     case 'u': s_con.x = s_con.sx; s_con.y = s_con.sy; break;
     case 'h': case 'l':

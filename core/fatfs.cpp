@@ -33,6 +33,7 @@ namespace hostfs_native {
     bool  rmdir(const std::string& path);
     bool  set_time(void* h, uint16_t date, uint16_t time);
     bool  get_time(void* h, uint16_t* date, uint16_t* time);
+    bool  set_attr(const std::string& path, uint8_t attr);
     std::string from_sjis(const std::string& s);
     std::string to_sjis(const std::string& s);
 }
@@ -327,6 +328,7 @@ bool list_dir(const std::string& dir, std::vector<HostDirEntry>& out) {
         h.is_dir = (e.raw[11] & 0x10) != 0;
         h.size = rd32(e.raw + 28);
         h.readonly = (e.raw[11] & 0x01) != 0;
+        h.attr = (uint8_t)(e.raw[11] & 0x27);
         h.dos_time = rd16(e.raw + 22); h.dos_date = rd16(e.raw + 24);
         out.push_back(h);
         return false;
@@ -341,7 +343,15 @@ bool stat(const std::string& path, HostDirEntry& h) {
     h.is_dir = (e.raw[11] & 0x10) != 0;
     h.size = rd32(e.raw + 28);
     h.readonly = (e.raw[11] & 0x01) != 0;
+    h.attr = (uint8_t)(e.raw[11] & 0x27);
     h.dos_time = rd16(e.raw + 22); h.dos_date = rd16(e.raw + 24);
+    return true;
+}
+bool set_attr(const std::string& path, uint8_t attr) {
+    Ent e; bool root = false;
+    if (!lookup(path, &e, &root) || root) return false;
+    e.raw[11] = (uint8_t)((e.raw[11] & 0x18) | (attr & 0x27));
+    ent_write(e);
     return true;
 }
 
@@ -631,6 +641,7 @@ bool mkdir(const std::string& p) { return fatfs::is_vpath(p) ? fatfs::mkdir(p) :
 bool rmdir(const std::string& p) { return fatfs::is_vpath(p) ? fatfs::rmdir(p) : hostfs_native::rmdir(p); }
 bool set_time(void* h, uint16_t d, uint16_t t) { return fatfs::is_handle(h) ? fatfs::set_time(h, d, t) : hostfs_native::set_time(h, d, t); }
 bool get_time(void* h, uint16_t* d, uint16_t* t) { return fatfs::is_handle(h) ? fatfs::get_time(h, d, t) : hostfs_native::get_time(h, d, t); }
+bool set_attr(const std::string& p, uint8_t a) { return fatfs::is_vpath(p) ? fatfs::set_attr(p, a) : hostfs_native::set_attr(p, a); }
 std::string from_sjis(const std::string& s) { return hostfs_native::from_sjis(s); }
 std::string to_sjis(const std::string& s) { return hostfs_native::to_sjis(s); }
 }

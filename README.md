@@ -3,6 +3,7 @@
 PC-9801 のゲームを、**インストール済みのフォルダごと** Windows 11 のアプリのように動かすプレイヤーです。
 GMPV3 Studio の「必要なデバイスの振る舞いと DOS ファンクションだけを自前で持つ小さな仮想 PC-98」を、
 音だけでなく **画面・キーボード・マウス・ファイル** まで広げたものです。
+
 <p>
 <img src="manual/images/ch1_sd_title.png" width="320">
 <img src="manual/images/ch1_sd_play.png" width="320">
@@ -67,7 +68,7 @@ EXE を 1 か所に置いたまま使い回す場合は、ショートカット�
 | BIOS | HLE: INT 18h（キー/CRT/グラフィック）、INT 1Ch（時計/インターバルタイマ）、IRQ1、INT 33h（マウスドライバ: カーソル表示・イベントハンドラ）、INT DCh |
 | DOS | HLE: INT 21h をゲームのフォルダへ直結（ファイル・FCB・MCB メモリ管理・EXEC・常駐終了・FindFirst・SFT/List of Lists など） |
 | 拡張メモリ | HLE: **HIMEM.SYS（XMS 3.0）** と **EMM386（LIM EMS 4.0、ページフレーム D000h）** |
-| シェル | COMMAND.COM の代わりにバッチを解釈（ECHO/IF ERRORLEVEL/IF EXIST/GOTO/CALL/SET/PAUSE/FOR/COPY/DEL/MD/RD/REN/TYPE/SUBST/COMMAND /C…）。SUBST で作ったドライブ（SUBST E: \GAME\DATA など）も使える |
+| シェル | COMMAND.COM の代わりにバッチを解釈（ECHO/IF ERRORLEVEL/IF EXIST/GOTO/CALL/SET/PAUSE/FOR/COPY/DEL/MD/RD/REN/TYPE/DIR/VER/VOL/PROMPT/SUBST/COMMAND /C…）。プログラムから起動された COMMAND.COM は対話のシェル（プロンプト・EXIT で戻る）として動く。SUBST で作ったドライブ（SUBST E: \GAME\DATA など）も使える |
 | 音 | GMPV3 Studio Core の OPNA レンダラ（ymfm）＋自前合成のリズム ROM、ビープ |
 | 文字 | 漢字 ROM の代わりに Windows の MS ゴシックを必要な字だけその場で描画 |
 

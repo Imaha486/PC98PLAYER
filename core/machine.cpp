@@ -826,10 +826,17 @@ void hle_trap(Machine* m, uint8_t n) {
     case HLE_INT20: case HLE_INT21: case HLE_INT25: case HLE_INT26: case HLE_INT27:
     case HLE_INT28: case HLE_INT29: case HLE_INT2F: case HLE_INT67: case HLE_XMS:
     case HLE_SHELL: case HLE_EXIT:
-        dos_hle(m, n); return;
+        dos_hle(m, n); break;
     default:
-        bios_hle(m, n); return;
+        bios_hle(m, n); break;
     }
+    // 実機の MS-DOS（INT 21h）と BIOS（INT 18h）は入口で STI する。割込みを禁止したまま
+    // INT 21h AH=06h や INT 18h でキーを待つソフト（ファイラーなど）でも、その間にキーボードの
+    // 割込みが入って入力が届く。入口の IRET の手前で割込みを受け付けられるようにする
+    // （戻りの IRET で呼び出し側の FLAGS に戻る）
+    if ((n == HLE_INT21 || n == HLE_INT18) && m->cpu.sr[CS_] == 0xF000 &&
+        mem_rb(m, 0xF0000u + (uint16_t)m->cpu.ip) == 0xCF)
+        m->cpu.fl |= FL_IF;
 }
 
 void set_cf(Machine* m, bool on) {

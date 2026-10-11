@@ -43,6 +43,7 @@ static const uint16_t D_COUNTRY   = 0x00A0;
 static const uint16_t D_NAMEBUF   = 0x0100;
 static const uint16_t D_DPB       = 0x0740;   // ゲームのドライブの DPB（21h バイト、DOS 4+ 形式）
 static const uint16_t D_BLKDEV    = 0x0770;   // その DPB が指すブロック装置のヘッダ（実体は無い）
+static const uint16_t D_DPB_FD    = 0x07C0;   // フロッピーのドライブの DPB（ユニットごとに 30h バイト）
 
 static inline uint32_t lin(uint16_t s, uint16_t o) { return ((uint32_t)s << 4) + o; }
 static inline uint16_t rw(Machine* m, uint32_t a) { return mem_rw(m, a); }
@@ -132,6 +133,16 @@ static bool s_shell_running;
 static uint16_t s_retcode_last;
 static uint16_t s_retcode_last_get() { return s_retcode_last & 0xFF; }
 static int  s_shell_wait;        // 1=PAUSE のキー待ち
+// プログラムから起動された COMMAND.COM（ファイラーの「シェル」や「COMMAND /C xxx.BAT」）。
+// 外側のシェル（Start= のバッチ）の状態をここへ退避して、子のシェルとして動かす
+struct ShellSession {
+    uint16_t psp; std::vector<BatchCtx> batch; bool running; int wait; bool interactive;
+};
+static std::vector<ShellSession> s_outer;
+static bool s_interactive;       // 今のシェルが対話（プロンプトを出して 1 行ずつ読む）か
+static std::string s_iline;      // 対話で入力中の行
+static bool s_prompted;          // プロンプトを出したか
+static bool s_exit_req;          // EXIT が入力された
 
 static void dos_error(Machine* m, uint16_t code) {
     if (m->cfg.trace) plog("[dos] AH=%02X -> error %d\n", (unsigned)(uint8_t)(m->cpu.r[EAX] >> 8), code);
@@ -554,6 +565,8 @@ static void keytab_push(const uint8_t* e, int len) {
 }
 
 // ---- コンソール入力 ------------------------------------------------------------
+// コンソールの入力に文字列を差し込む（ESC[6n のカーソル位置の報告など）
+void dos_con_inject(const char* s) { s_pending_input += s; }
 static bool con_have_char(Machine* m) {
     if (!s_keytab_init) keytab_default();
     if (!s_pending_input.empty()) return true;
@@ -899,11 +912,15 @@ static bool wild_match(const std::string& pat, const std::string& name) {
     }
     return true;
 }
+// ディレクトリの項目の DOS の属性（ディレクトリは 10h、ファイルは R/H/S/A をそのまま）
+static uint8_t dos_attr_of(const HostDirEntry& e) {
+    return e.is_dir ? (uint8_t)(0x10 | (e.attr & 0x07)) : (uint8_t)(e.attr & 0x27);
+}
 static void fill_dta(Machine* m, const HostDirEntry& e, const std::string& gname, int sid, int pos) {
     uint32_t d = lin(s_dta_seg, s_dta_off);
     mem_wb(m, d + 0, 0xA5); mem_wb(m, d + 1, 0x5A);
     ww(m, d + 2, (uint16_t)sid); ww(m, d + 4, (uint16_t)pos);
-    uint8_t attr = (uint8_t)((e.is_dir ? 0x10 : 0x20) | (e.readonly ? 1 : 0));
+    uint8_t attr = dos_attr_of(e);
     mem_wb(m, d + 0x15, attr);
     ww(m, d + 0x16, e.dos_time); ww(m, d + 0x18, machine_file_date(m, e.dos_date));
     ww(m, d + 0x1A, (uint16_t)e.size); ww(m, d + 0x1C, (uint16_t)(e.size >> 16));
@@ -917,6 +934,7 @@ static bool find_next_in(Machine* m, int sid) {
         std::string g = e.name == "." || e.name == ".." ? e.name : upper_dbcs(hostfs::to_sjis(e.name));
         if (e.name != "." && e.name != ".." && !valid83(g)) continue;
         if (e.is_dir && !(s.attr & 0x10)) continue;
+        if ((e.attr & 0x06) & ~s.attr) continue;   // 隠し・システムは、探す属性に含めたときだけ
         if (!wild_match(s.pattern, g) && !(g == "." || g == "..")) continue;
         if ((g == "." || g == "..") && !wild_match(s.pattern, g)) continue;
         fill_dta(m, e, g, sid, (int)s.pos);
@@ -1066,6 +1084,15 @@ static uint8_t fcb_write_rec(Machine* m, uint32_t f, int sft, uint32_t rec, uint
     fcb_update_size(m, f, sft);
     return w == n ? 0 : 1;
 }
+// FCB の機能が対象にするディレクトリ: FCB のドライブ（0=今のドライブ）のカレントディレクトリ
+static std::string fcb_dir(Machine* m, uint32_t f, bool* exists, char* drive) {
+    uint8_t dn = mem_rb(m, f);
+    std::string spec = dn ? std::string(1, (char)('A' + dn - 1)) + ":." : std::string(".");
+    std::vector<std::string> comps;
+    split_guest(spec, comps, nullptr);
+    if (drive) *drive = s_sg_drive;
+    return host_of(m, comps, comps.size(), exists);
+}
 static bool fcb_find(Machine* m, bool first) {
     uint32_t xattr = 0;
     uint32_t p = lin(DS(m), DX(m));
@@ -1079,9 +1106,10 @@ static bool fcb_find(Machine* m, bool first) {
         std::string e; for (int i = 0; i < 3; i++) e.push_back((char)mem_rb(m, f + 9 + i));
         while (!e.empty() && e.back() == ' ') e.pop_back();
         pat += "." + e;
-        std::vector<std::string> comps;
-        bool exists;
-        std::string dir = host_of(m, comps, 0, &exists);
+        bool exists; char fdrv = 0;
+        std::string dir = fcb_dir(m, f, &exists, &fdrv);
+        if (!exists) return false;
+        mem_wb(m, f, (uint8_t)(fdrv - 'A' + 1));   // 見つけた項目のドライブ番号
         sid = -1;
         for (size_t i = 0; i < s_search.size(); i++) if (!s_search[i].used) { sid = (int)i; break; }
         if (sid < 0) { if (s_search.size() >= 64) s_search.erase(s_search.begin()); s_search.push_back(Search()); sid = (int)s_search.size() - 1; }
@@ -1105,7 +1133,7 @@ static bool fcb_find(Machine* m, bool first) {
         ww(m, f + 0x0E, (uint16_t)s.pos);
         uint32_t d = lin(s_dta_seg, s_dta_off);
         if (ext) { mem_wb(m, d, 0xFF); for (int i = 1; i < 6; i++) mem_wb(m, d + i, 0); mem_wb(m, d + 6, (uint8_t)(e.is_dir ? 0x10 : 0x20)); d += 7; }
-        mem_wb(m, d, (uint8_t)(m->cfg.drive - 'A' + 1));
+        mem_wb(m, d, mem_rb(m, f) ? mem_rb(m, f) : (uint8_t)(cur_drive(m) - 'A' + 1));
         std::string b = g, x;
         size_t dot = g.find('.');
         if (dot != std::string::npos) { b = g.substr(0, dot); x = g.substr(dot + 1); }
@@ -1142,10 +1170,12 @@ static bool fcb_call(Machine* m, uint8_t ah) {
             bool ex; std::string h = guest_to_host(m, n, &ex, nullptr, nullptr);
             if (ex && hostfs::remove(h)) any = true;
         } else {
+            // ワイルドカードの削除は、FCB のドライブのカレントディレクトリが対象（ルートではない）
             std::string pat = n.size() > 2 && n[1] == ':' ? n.substr(2) : n;
-            std::vector<std::string> comps; bool exists;
-            std::string dir = host_of(m, comps, 0, &exists);
-            std::vector<HostDirEntry> lst = dir_list(dir);
+            bool exists = false;
+            std::string dir = fcb_dir(m, f, &exists, nullptr);
+            std::vector<HostDirEntry> lst;
+            if (exists) lst = dir_list(dir);
             for (auto& e : lst) {
                 if (e.is_dir) continue;
                 std::string g = upper_dbcs(hostfs::to_sjis(e.name));
@@ -1305,6 +1335,19 @@ static int dos_resolve_exec(Machine* m, const std::string& name, std::string* fo
 
 // ---- EXEC --------------------------------------------------------------------
 static bool run_command(Machine* m, const std::string& cmdline);
+static bool nested_shell_start(Machine* m, uint16_t env_src, bool interactive, const std::string& batch, const std::vector<std::string>& args);
+static void nested_shell_end(Machine* m);
+static void push_exec_frame(Machine* m, uint16_t child_psp) {
+    ExecFrame f;
+    Cpu* c = &m->cpu;
+    for (int i = 0; i < 8; i++) f.r[i] = c->r[i];
+    for (int i = 0; i < 6; i++) f.sr[i] = c->sr[i];
+    f.ip = c->ip; f.cs = c->sr[CS_]; f.fl = c->fl;
+    f.parent_psp = s_psp; f.child_psp = child_psp;
+    f.dta_seg = s_dta_seg; f.dta_off = s_dta_off;
+    ww(m, lin(s_psp, 0x2E), (uint16_t)c->r[ESP]); ww(m, lin(s_psp, 0x30), c->sr[SS_]);
+    s_frames.push_back(f);
+}
 static void dos_exec(Machine* m) {
     uint8_t al = AL(m);
     std::string name = read_asciiz(m, DS(m), DX(m));
@@ -1351,7 +1394,12 @@ static void dos_exec(Machine* m) {
     if (base == "COMMAND.COM") {
         std::string t = tail;
         size_t p = upper_dbcs(t).find("/C");
-        if (p == std::string::npos) { s_retcode = 0; dos_ok(m); return; }
+        uint16_t envsrc = env ? env : rw(m, lin(s_psp, 0x2C));
+        if (p == std::string::npos) {
+            // /C なし: 対話のシェル（ファイラーの「シェル」など。EXIT で呼び出し元へ戻る）
+            if (al == 0 && nested_shell_start(m, envsrc, true, "", {})) return;
+            s_retcode = 0; dos_ok(m); return;
+        }
         t = t.substr(p + 2);
         while (!t.empty() && t[0] == ' ') t.erase(0, 1);
         size_t sp = t.find(' ');
@@ -1372,7 +1420,18 @@ static void dos_exec(Machine* m) {
             }
         }
         std::string found;
-        if (dos_resolve_exec(m, prog, &found) != 0) { s_retcode = 1; dos_ok(m); return; }
+        if (dos_resolve_exec(m, prog, &found) != 0) {
+            const char* msg = "Bad command or file name\r\n";
+            for (const char* q = msg; *q; q++) console_putc(m, (uint8_t)*q);
+            s_retcode = 1; dos_ok(m); return;
+        }
+        std::string uf = upper_dbcs(found);
+        if (uf.size() > 4 && uf.substr(uf.size() - 4) == ".BAT") {   // バッチは子のシェルで動かす
+            std::vector<std::string> args = split_args(tail);
+            args.insert(args.begin(), prog);
+            if (al == 0 && nested_shell_start(m, envsrc, false, found, args)) return;
+            s_retcode = 1; dos_ok(m); return;
+        }
         name = found;
         as_given = false;
     }
@@ -1385,15 +1444,7 @@ static void dos_exec(Machine* m) {
         s_psp = lr.psp;
         dos_ok(m); return;
     }
-    ExecFrame f;
-    Cpu* c = &m->cpu;
-    for (int i = 0; i < 8; i++) f.r[i] = c->r[i];
-    for (int i = 0; i < 6; i++) f.sr[i] = c->sr[i];
-    f.ip = c->ip; f.cs = c->sr[CS_]; f.fl = c->fl;
-    f.parent_psp = s_psp; f.child_psp = lr.psp;
-    f.dta_seg = s_dta_seg; f.dta_off = s_dta_off;
-    ww(m, lin(s_psp, 0x2E), (uint16_t)c->r[ESP]); ww(m, lin(s_psp, 0x30), c->sr[SS_]);
-    s_frames.push_back(f);
+    push_exec_frame(m, lr.psp);
     start_program(m, lr);
 }
 
@@ -1484,9 +1535,33 @@ static void int21(Machine* m) {
     case 0x30: SETAX(m, (uint16_t)(((m->cfg.dos_version & 0xFF) << 8) | ((m->cfg.dos_version >> 8) & 0xFF)) );
                SETBX(m, 0xFF00); SETCX(m, 0); return;
     case 0x31: terminate(m, AL(m), 3, DX(m)); return;
-    case 0x1F: case 0x32: {   // DPB の取得（ゲームのドライブだけ持っている）
-        int dr = ah == 0x1F || DL(m) == 0 ? (m->cfg.drive - 'A') : DL(m) - 1;
-        if (dr != m->cfg.drive - 'A') { SETAL(m, 0xFF); return; }
+    case 0x1F: case 0x32: {   // DPB の取得（ゲームのドライブと、FAT のフロッピー）
+        int dr = ah == 0x1F ? (m->cfg.drive - 'A') : DL(m) == 0 ? (cur_drive(m) - 'A') : DL(m) - 1;
+        if (dr != m->cfg.drive - 'A') {
+            // フロッピーのイメージ: 起動セクタの BPB から本物の DPB を作る（INT 25h/26h で
+            // ディレクトリを直接読み書きするファイラーなどが使う）
+            int fu = floppy::unit_of_letter((char)('A' + dr));
+            FloppyImage* im = fu >= 0 ? floppy::image_unit(fu) : nullptr;
+            std::vector<uint8_t> b(im ? (size_t)im->lsec_size : 0);
+            if (!im || !im->read_lba(0, b.data()) || b.size() < 32) { SETAL(m, 0xFF); return; }
+            uint16_t bps = (uint16_t)(b[11] | (b[12] << 8)), res = (uint16_t)(b[14] | (b[15] << 8)), roots = (uint16_t)(b[17] | (b[18] << 8));
+            uint8_t spc = b[13], nf = b[16];
+            uint32_t tot = (uint32_t)(b[19] | (b[20] << 8)); if (!tot) tot = (uint32_t)b[32] | ((uint32_t)b[33] << 8) | ((uint32_t)b[34] << 16) | ((uint32_t)b[35] << 24);
+            uint16_t spf = (uint16_t)(b[22] | (b[23] << 8));
+            if (!bps || !spc || !nf || !spf || (bps & (bps - 1))) { SETAL(m, 0xFF); return; }
+            uint32_t rootsec = res + (uint32_t)nf * spf, datasec = rootsec + ((uint32_t)roots * 32 + bps - 1) / bps;
+            uint32_t ncl = tot > datasec ? (tot - datasec) / spc : 0;
+            uint32_t D = lin(DOSSEG, (uint16_t)(D_DPB_FD + fu * 0x30));
+            int sh = 0; while ((1 << sh) < spc) sh++;
+            mem_wb(m, D + 0x00, (uint8_t)dr); mem_wb(m, D + 0x01, (uint8_t)fu);
+            ww(m, D + 0x02, bps); mem_wb(m, D + 0x04, (uint8_t)(spc - 1)); mem_wb(m, D + 0x05, (uint8_t)sh);
+            ww(m, D + 0x06, res); mem_wb(m, D + 0x08, nf); ww(m, D + 0x09, roots);
+            ww(m, D + 0x0B, (uint16_t)datasec); ww(m, D + 0x0D, (uint16_t)(ncl + 1)); ww(m, D + 0x0F, spf); ww(m, D + 0x11, (uint16_t)rootsec);
+            ww(m, D + 0x13, D_BLKDEV); ww(m, D + 0x15, DOSSEG);
+            mem_wb(m, D + 0x17, b[21]); mem_wb(m, D + 0x18, 0);
+            ww(m, D + 0x19, 0xFFFF); ww(m, D + 0x1B, 0xFFFF); ww(m, D + 0x1D, 0xFFFF); ww(m, D + 0x1F, 0xFFFF);
+            cpu_setsr(c, DS_, DOSSEG); SETBX(m, (uint16_t)(D_DPB_FD + fu * 0x30)); SETAL(m, 0); return;
+        }
         cpu_setsr(c, DS_, DOSSEG); SETBX(m, D_DPB); SETAL(m, 0); return; }
     case 0x33: {
         uint8_t al = AL(m);
@@ -1565,7 +1640,13 @@ static void int21(Machine* m) {
         HostDirEntry st;
         if (m->cfg.trace) { static int cnt = 0; if (cnt++ < 40) plog("[dos] attr %s\n", n.c_str()); }
         if (!ex || !hostfs::stat(h, st)) { dos_error(m, 2); return; }
-        if (AL(m) == 0) { SETCX(m, (uint16_t)((st.is_dir ? 0x10 : 0x20) | (st.readonly ? 1 : 0))); }
+        if (AL(m) == 0) { SETCX(m, dos_attr_of(st)); SETAX(m, dos_attr_of(st)); }
+        else if (AL(m) == 1) {   // 属性の変更（R/H/S/A。ディレクトリ・ボリュームラベルの属性は変えられない）
+            uint8_t na = (uint8_t)CX(m);
+            if (na & 0x08) { dos_error(m, 5); return; }   // ボリュームラベルにはできない（ディレクトリの 10h は付いていてもよい）
+            if (!hostfs::set_attr(h, (uint8_t)(na & 0x27))) { dos_error(m, 5); return; }
+            dir_invalidate();
+        }
         dos_ok(m); return; }
     case 0x44: {
         uint8_t al = AL(m);
@@ -1588,7 +1669,10 @@ static void int21(Machine* m) {
             dos_ok(m); return;
         }
         if (al == 0x08) { SETAX(m, 1); dos_ok(m); return; }
-        if (al == 0x09) { SETDX(m, 0); dos_ok(m); return; }
+        if (al == 0x09) {   // ドライブがリモートか: 無いドライブはエラー（使えるドライブの一覧を作るファイラーがある）
+            char d = (BX(m) & 0xFF) ? (char)('A' + (BX(m) & 0xFF) - 1) : cur_drive(m);
+            if (!drive_valid(m, d)) { dos_error(m, 15); return; }
+            SETDX(m, 0); dos_ok(m); return; }
         if (al == 0x0E) { SETAL(m, 0); dos_ok(m); return; }
         if (al == 0x0B) { dos_ok(m); return; }
         dos_error(m, 1); return; }
@@ -1868,6 +1952,114 @@ static std::string expand_vars(const BatchCtx& b, const std::string& line) {
 // 1 コマンドを実行。プログラムを起動したら true（CPU はそちらへ移っている）。
 static bool shell_exec_line(Machine* m, std::string line);
 
+// DIR / VOL（MS-DOS 5.0 の日本語版に似た表示。/W は横に並べる、/P などほかのスイッチは無視）
+// ソースの日本語（UTF-8）を画面に出すシフト JIS にする
+static std::string J(const char* u8) { return hostfs::to_sjis(u8); }
+static std::string fmt_num(uint64_t v) {
+    std::string s = std::to_string((unsigned long long)v), r;
+    for (size_t i = 0; i < s.size(); i++) { if (i && (s.size() - i) % 3 == 0) r.push_back(','); r.push_back(s[i]); }
+    return r;
+}
+static bool shell_dir(Machine* m, const std::string& cmd, const std::string& arg) {
+    bool wide = false;
+    std::string spec;
+    for (auto& x : split_args(arg)) {
+        if (x[0] == '/') { if (x.size() > 1 && (x[1] == 'W' || x[1] == 'w')) wide = true; continue; }
+        spec = x;
+    }
+    char d = cur_drive(m);
+    if (spec.size() >= 2 && spec[1] == ':') d = (char)toupper((uint8_t)spec[0]);
+    if (!drive_valid(m, d)) { shell_print(m, "Invalid drive specification"); return false; }
+    std::string lab; uint16_t ld = 0, lt = 0;
+    bool has_lab = floppy::unit_of_letter(d) >= 0 && fatfs::volume_label_drive(d, &lab, &ld, &lt);
+    shell_print(m, "");
+    if (has_lab) shell_print(m, J(" ドライブ ") + d + J(": のボリュームラベルは ") + lab + J(" です"));
+    else shell_print(m, J(" ドライブ ") + d + J(": にはボリュームラベルがありません"));
+    if (cmd == "VOL") { shell_print(m, ""); return false; }
+    // 対象のディレクトリとパターン
+    std::string pat = "*.*", dirspec = spec;
+    {
+        std::vector<std::string> comps; split_guest(spec.empty() ? "." : spec, comps, nullptr);
+        bool ex = false; std::string h = host_of(m, comps, comps.size(), &ex);
+        HostDirEntry he;
+        if (spec.empty() || (ex && hostfs::stat(h, he) && he.is_dir)) {
+            // ディレクトリそのもの
+        } else {
+            size_t sl = spec.find_last_of("\:");
+            pat = upper_dbcs(sl == std::string::npos ? spec : spec.substr(sl + 1));
+            dirspec = sl == std::string::npos ? "" : spec.substr(0, sl + 1);
+            if (pat.find('.') == std::string::npos) pat += ".*";
+        }
+    }
+    std::vector<std::string> comps; split_guest(dirspec.empty() ? "." : dirspec, comps, nullptr);
+    bool ex = false; std::string hdir = host_of(m, comps, comps.size(), &ex);
+    std::string shown = std::string(1, s_sg_drive ? s_sg_drive : d) + ":\\";
+    for (size_t i = 0; i < comps.size(); i++) { if (i) shown += "\\"; shown += comps[i]; }
+    shell_print(m, J(" ディレクトリは ") + shown);
+    shell_print(m, "");
+    if (!ex) { shell_print(m, J("ファイルが見つかりません")); return false; }
+    std::vector<HostDirEntry> lst = dir_list(hdir);
+    std::sort(lst.begin(), lst.end(), [](const HostDirEntry& x, const HostDirEntry& y) { return x.name < y.name; });
+    if (!comps.empty()) {   // サブディレクトリでは . と .. も出す
+        HostDirEntry dot; dot.is_dir = true; dot.size = 0; dot.dos_date = 0x2821; dot.dos_time = 0; dot.readonly = false; dot.attr = 0;
+        dot.name = ".."; lst.insert(lst.begin(), dot); dot.name = "."; lst.insert(lst.begin(), dot);
+    }
+    unsigned nfiles = 0; uint64_t total = 0; int col = 0;
+    for (auto& e : lst) {
+        std::string g = e.name == "." || e.name == ".." ? e.name : upper_dbcs(hostfs::to_sjis(e.name));
+        if (g != "." && g != ".." && !valid83(g)) continue;
+        if (e.attr & 0x06) continue;
+        if (!wild_match(pat, g) && !(g == "." || g == "..")) continue;
+        std::string b = g, x;
+        size_t dt = g.find('.');
+        if (dt != std::string::npos && g != "." && g != "..") { b = g.substr(0, dt); x = g.substr(dt + 1); }
+        if (wide) {
+            std::string cell = e.is_dir ? "[" + g + "]" : g;
+            while (cell.size() < 16) cell.push_back(' ');
+            for (char c : cell) console_putc(m, (uint8_t)c);
+            if (++col == 5) { col = 0; console_putc(m, 0x0D); console_putc(m, 0x0A); }
+        } else {
+            char line[96];
+            uint16_t dd = machine_file_date(m, e.dos_date), tt = e.dos_time;
+            int yy = ((dd >> 9) + 80) % 100, mo = (dd >> 5) & 15, da = dd & 31, hh = tt >> 11, mi = (tt >> 5) & 63;
+            std::string sz = e.is_dir ? "<DIR>     " : fmt_num(e.size);
+            snprintf(line, sizeof(line), "%-8s %-3s %14s %02d-%02d-%02d  %2d:%02d", b.c_str(), x.c_str(), e.is_dir ? "<DIR>" : sz.c_str(), yy, mo, da, hh, mi);
+            shell_print(m, line);
+        }
+        nfiles++; if (!e.is_dir) total += e.size;
+    }
+    if (wide && col) { console_putc(m, 0x0D); console_putc(m, 0x0A); }
+    char line[96];
+    snprintf(line, sizeof(line), "%10u", nfiles);
+    shell_print(m, line + J(" 個のファイル ") + std::string(14 - std::min<size_t>(14, fmt_num(total).size()), ' ') + fmt_num(total) + J(" バイト"));
+    uint32_t spc = 0, bps = 0, fr = 0, tot = 0; uint64_t freeb = (uint64_t)m->cfg.free_mb * 1024 * 1024;
+    if (floppy::unit_of_letter(d) >= 0 && fatfs::free_space_drive(d, &spc, &bps, &fr, &tot)) freeb = (uint64_t)spc * bps * fr;
+    snprintf(line, sizeof(line), "%40s", fmt_num(freeb).c_str());
+    shell_print(m, line + J(" バイトの空き領域"));
+    shell_print(m, "");
+    return false;
+}
+static std::string shell_prompt(Machine* m) {
+    auto it = s_env.find("PROMPT");
+    std::string p = it == s_env.end() ? "$N$G" : it->second, out;
+    char d = cur_drive(m);
+    for (size_t i = 0; i < p.size(); i++) {
+        if (p[i] != '$' || i + 1 >= p.size()) { out.push_back(p[i]); continue; }
+        char c = (char)toupper((uint8_t)p[++i]);
+        if (c == 'P') { out += std::string(1, d) + ":\\" + cwd_of(m, d); }
+        else if (c == 'N') out.push_back(d);
+        else if (c == 'G') out.push_back('>');
+        else if (c == 'L') out.push_back('<');
+        else if (c == 'Q') out.push_back('=');
+        else if (c == 'B') out.push_back('|');
+        else if (c == '_') out += "\r\n";
+        else if (c == '$') out.push_back('$');
+        else if (c == 'E') out.push_back(0x1B);
+        else if (c == 'V') out += "MS-DOS Version 5.00";
+    }
+    return out;
+}
+
 static bool run_command(Machine* m, const std::string& cmdline) {
     std::string line = trim(cmdline);
     if (line.empty()) return false;
@@ -1905,8 +2097,9 @@ static bool run_command(Machine* m, const std::string& cmdline) {
         else shell_print(m, "Invalid drive specification");
         return false;
     }
-    if (cmd == "REM" || cmd == "BREAK" || cmd == "VERIFY" || cmd == "PROMPT" || cmd == "TITLE" ||
-        cmd == "MODE" || cmd == "KEYB" || cmd == "CHCP" || cmd == "VER" || cmd == "VOL" || cmd == "LOADFIX") {
+    if (cmd == "PROMPT") { if (arg.empty()) s_env.erase("PROMPT"); else s_env["PROMPT"] = arg.substr(arg[0] == '=' ? 1 : 0); return false; }
+    if (cmd == "REM" || cmd == "BREAK" || cmd == "VERIFY" || cmd == "TITLE" ||
+        cmd == "MODE" || cmd == "KEYB" || cmd == "CHCP" || cmd == "LOADFIX") {
         if (cmd == "LOADFIX" && !arg.empty()) return run_command(m, arg);
         return false;
     }
@@ -2062,7 +2255,9 @@ static bool run_command(Machine* m, const std::string& cmdline) {
         }
         return run_command(m, arg);
     }
-    if (cmd == "EXIT") { s_batch.clear(); return false; }
+    if (cmd == "EXIT") { s_batch.clear(); if (!s_outer.empty()) s_exit_req = true; return false; }
+    if (cmd == "VER") { shell_print(m, ""); shell_print(m, "MS-DOS Version 5.00"); shell_print(m, ""); return false; }
+    if (cmd == "VOL" || cmd == "DIR") return shell_dir(m, cmd, arg);
     if (cmd == "COMMAND") {
         // COMMAND /C xxx は xxx を実行、それ以外（常駐シェルの起動）は何もしない
         std::string a = trim(arg);
@@ -2140,7 +2335,7 @@ static bool run_command(Machine* m, const std::string& cmdline) {
                 if (valid83(g) && wild_match(pat, g)) out.push_back({g, hostfs::join(dir, e.name)});
             }
         };
-        if (cmd == "DIR" || cmd == "ATTRIB") return false;
+        if (cmd == "ATTRIB") return false;
         if (cmd == "DEL" || cmd == "ERASE") {
             for (auto& a1 : args) { std::vector<std::pair<std::string,std::string>> f; expand(a1, f); for (auto& x : f) hostfs::remove(x.second); }
             dir_invalidate(); return false;
@@ -2253,6 +2448,44 @@ static void shell_step(Machine* m) {
         s_shell_wait = 0;
     }
     for (int guard = 0; guard < 2000; guard++) {
+        if (!s_outer.empty() && (s_exit_req || (s_batch.empty() && !s_interactive))) { nested_shell_end(m); return; }
+        if (s_batch.empty() && s_interactive) {
+            if (!s_prompted) {
+                std::string pr = shell_prompt(m);
+                console_putc(m, 0x0D); console_putc(m, 0x0A);
+                for (char ch : pr) console_putc(m, (uint8_t)ch);
+                s_prompted = true;
+            }
+            while (con_have_char(m)) {
+                uint8_t ch = con_get_char(m);
+                if (ch == 0x0D) {
+                    console_putc(m, 0x0D); console_putc(m, 0x0A);
+                    std::string line = s_iline; s_iline.clear(); s_prompted = false;
+                    if (shell_exec_line(m, line)) return;
+                    if (s_shell_wait) return;
+                    break;
+                }
+                if (ch == 0x08) {
+                    if (s_iline.empty()) continue;
+                    // 全角の 2 バイト目なら 2 バイト消す
+                    size_t i = 0, last = 0;
+                    while (i < s_iline.size()) { last = i; uint8_t b = (uint8_t)s_iline[i]; i += ((b >= 0x81 && b <= 0x9F) || (b >= 0xE0 && b <= 0xFC)) && i + 1 < s_iline.size() ? 2 : 1; }
+                    int w = (int)(s_iline.size() - last);
+                    s_iline.erase(last);
+                    for (int k = 0; k < w; k++) { console_putc(m, 0x08); console_putc(m, ' '); console_putc(m, 0x08); }
+                    continue;
+                }
+                if (ch == 0x1B) {   // 行の取り消し
+                    console_putc(m, '\\'); console_putc(m, 0x0D); console_putc(m, 0x0A);
+                    s_iline.clear(); s_prompted = false;
+                    break;
+                }
+                if (ch < 0x20 && ch != 0x09) continue;
+                if (s_iline.size() < 126) { s_iline.push_back((char)ch); console_putc(m, ch); }
+            }
+            if (!s_prompted) continue;   // 次の行のプロンプトへ
+            return;                      // キーを待つ（スタブ側で HLT する）
+        }
         if (s_batch.empty()) {
             if (s_shell_running) {
                 s_shell_running = false;
@@ -2282,6 +2515,40 @@ static void shell_resume(Machine* m) {
     cpu_setsr(c, DS_, s_shell_psp); cpu_setsr(c, ES_, s_shell_psp);
     c->fl = 0x0202;
     c->halted = 0;
+}
+
+// 子の COMMAND.COM を始める。呼び出し元（EXEC した側）は ExecFrame に積み、終わったらそこへ戻る
+static bool nested_shell_start(Machine* m, uint16_t env_src, bool interactive, const std::string& batch, const std::vector<std::string>& args) {
+    if (s_outer.size() >= 4) return false;
+    std::vector<uint8_t> env = build_env(m, env_src, std::string(1, m->cfg.drive) + ":\\COMMAND.COM");
+    uint16_t envseg = 0, psp = 0, lg = 0;
+    uint16_t env_paras = (uint16_t)((env.size() + 15) / 16);
+    if (mem_alloc(m, env_paras, 0xFFFF, &envseg, &lg)) return false;
+    if (mem_alloc(m, 0x100, 0xFFFF, &psp, &lg)) { mem_free(m, envseg); return false; }
+    for (size_t i = 0; i < env.size(); i++) m->ram[lin(envseg, 0) + i] = env[i];
+    ww(m, lin((uint16_t)(envseg - 1), 1), psp);
+    ww(m, lin((uint16_t)(psp - 1), 1), psp);
+    mcb_name(m, (uint16_t)(psp - 1), "COMMAND");
+    build_psp(m, psp, (uint16_t)(psp + 0x100), envseg, s_psp, "");
+    push_exec_frame(m, psp);
+    ShellSession o;
+    o.psp = s_shell_psp; o.batch = s_batch; o.running = s_shell_running; o.wait = s_shell_wait; o.interactive = s_interactive;
+    s_outer.push_back(o);
+    s_shell_psp = psp; s_batch.clear(); s_shell_running = true; s_shell_wait = 0;
+    s_interactive = interactive; s_iline.clear(); s_prompted = false; s_exit_req = false;
+    if (!interactive) load_batch(m, batch, args, true);
+    if (m->cfg.trace) plog("[shell] COMMAND.COM を子として起動（%s）PSP=%04X\n", interactive ? "対話" : batch.c_str(), psp);
+    shell_resume(m);
+    return true;
+}
+static void nested_shell_end(Machine* m) {
+    uint16_t psp = s_shell_psp;
+    ShellSession o = s_outer.back(); s_outer.pop_back();
+    s_shell_psp = o.psp; s_batch = o.batch; s_shell_running = o.running; s_shell_wait = o.wait; s_interactive = o.interactive;
+    s_iline.clear(); s_prompted = false; s_exit_req = false;
+    if (m->cfg.trace) plog("[shell] 子の COMMAND.COM が終わりました PSP=%04X\n", psp);
+    s_psp = psp;
+    terminate(m, (uint8_t)s_retcode_last, 0, 0);
 }
 
 void shell_start(Machine* m, const std::string& cmdline) {

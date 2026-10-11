@@ -41,6 +41,10 @@ std::string join(const std::string& a, const std::string& b) {
     char c = a.back();
     return (c == '\\' || c == '/') ? a + b : a + "\\" + b;
 }
+static uint8_t win_attr(DWORD a) {
+    return (uint8_t)(((a & FILE_ATTRIBUTE_READONLY) ? 0x01 : 0) | ((a & FILE_ATTRIBUTE_HIDDEN) ? 0x02 : 0) |
+                     ((a & FILE_ATTRIBUTE_SYSTEM) ? 0x04 : 0) | ((a & FILE_ATTRIBUTE_ARCHIVE) ? 0x20 : 0));
+}
 static void ft_to_dos(const FILETIME& ft, uint16_t* d, uint16_t* t) {
     FILETIME lt; FileTimeToLocalFileTime(&ft, &lt);
     WORD dd = 0, tt = 0; FileTimeToDosDateTime(&lt, &dd, &tt);
@@ -57,6 +61,7 @@ bool list_dir(const std::string& dir, std::vector<HostDirEntry>& out) {
         e.is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         e.size = fd.nFileSizeLow;
         e.readonly = (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY) != 0;
+        e.attr = win_attr(fd.dwFileAttributes);
         ft_to_dos(fd.ftLastWriteTime, &e.dos_date, &e.dos_time);
         out.push_back(e);
     } while (FindNextFileW(h, &fd));
@@ -69,13 +74,30 @@ bool stat(const std::string& path, HostDirEntry& e) {
     e.is_dir = (a.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
     e.size = a.nFileSizeLow;
     e.readonly = (a.dwFileAttributes & FILE_ATTRIBUTE_READONLY) != 0;
+    e.attr = win_attr(a.dwFileAttributes);
     ft_to_dos(a.ftLastWriteTime, &e.dos_date, &e.dos_time);
     return true;
+}
+bool set_attr(const std::string& path, uint8_t attr) {
+    DWORD cur = GetFileAttributesW(W(path).c_str());
+    if (cur == INVALID_FILE_ATTRIBUTES) return false;
+    DWORD keep = cur & ~(DWORD)(FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_NORMAL);
+    DWORD v = keep;
+    if (attr & 0x01) v |= FILE_ATTRIBUTE_READONLY;
+    if (attr & 0x02) v |= FILE_ATTRIBUTE_HIDDEN;
+    if (attr & 0x04) v |= FILE_ATTRIBUTE_SYSTEM;
+    if (attr & 0x20) v |= FILE_ATTRIBUTE_ARCHIVE;
+    if (!v) v = FILE_ATTRIBUTE_NORMAL;
+    return SetFileAttributesW(W(path).c_str(), v) != 0;
 }
 void* open(const std::string& path, int mode, bool create, bool trunc) {
     DWORD acc = mode == 0 ? GENERIC_READ : mode == 1 ? GENERIC_WRITE : (GENERIC_READ | GENERIC_WRITE);
     DWORD disp = create ? (trunc ? CREATE_ALWAYS : OPEN_ALWAYS) : OPEN_EXISTING;
-    HANDLE h = CreateFileW(W(path).c_str(), acc, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, disp, FILE_ATTRIBUTE_NORMAL, nullptr);
+    HANDLE h = INVALID_HANDLE_VALUE;
+    // 読み込みで開いたハンドルでも INT 21h AH=5701h（日付の変更）ができるよう、属性の書き込みも求める
+    //（ファイラーは読み取り専用のファイルを読み込みで開いて日付を変える）。だめなら読み込みだけで開く
+    if (mode == 0) h = CreateFileW(W(path).c_str(), GENERIC_READ | FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, disp, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) h = CreateFileW(W(path).c_str(), acc, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, disp, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE && mode != 0 && !create) {
         // 読み取り専用のファイルを読み書きで開こうとした（CD から写したゲームでよくある）
         h = CreateFileW(W(path).c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -154,6 +176,7 @@ bool list_dir(const std::string& dir, std::vector<HostDirEntry>& out) {
         e.is_dir = S_ISDIR(st.st_mode);
         e.size = (uint32_t)st.st_size;
         e.readonly = !(st.st_mode & S_IWUSR);
+        e.attr = (uint8_t)(0x20 | (e.readonly ? 1 : 0));
         tm_to_dos(st.st_mtime, &e.dos_date, &e.dos_time);
         out.push_back(e);
     }
@@ -166,8 +189,16 @@ bool stat(const std::string& path, HostDirEntry& e) {
     e.is_dir = S_ISDIR(st.st_mode);
     e.size = (uint32_t)st.st_size;
     e.readonly = !(st.st_mode & S_IWUSR);
+    e.attr = (uint8_t)(0x20 | (e.readonly ? 1 : 0));
     tm_to_dos(st.st_mtime, &e.dos_date, &e.dos_time);
     return true;
+}
+bool set_attr(const std::string& path, uint8_t attr) {   // POSIX は読み取り専用だけ
+    struct stat st;
+    if (::stat(path.c_str(), &st) != 0) return false;
+    mode_t md = st.st_mode & 07777;
+    md = (attr & 1) ? (md & ~(mode_t)0222) : (md | S_IWUSR);
+    return chmod(path.c_str(), md) == 0;
 }
 void* open(const std::string& path, int mode, bool create, bool trunc) {
     int fl = mode == 0 ? O_RDONLY : mode == 1 ? O_WRONLY : O_RDWR;
@@ -188,7 +219,14 @@ bool remove(const std::string& p) { return ::unlink(p.c_str()) == 0; }
 bool rename(const std::string& a, const std::string& b) { return ::rename(a.c_str(), b.c_str()) == 0; }
 bool mkdir(const std::string& p) { return ::mkdir(p.c_str(), 0755) == 0; }
 bool rmdir(const std::string& p) { return ::rmdir(p.c_str()) == 0; }
-bool set_time(void*, uint16_t, uint16_t) { return true; }
+bool set_time(void* h, uint16_t d, uint16_t t) {
+    struct tm lt = {};
+    lt.tm_year = ((d >> 9) & 0x7F) + 80; lt.tm_mon = ((d >> 5) & 15) - 1; lt.tm_mday = d & 31;
+    lt.tm_hour = (t >> 11) & 31; lt.tm_min = (t >> 5) & 63; lt.tm_sec = (t & 31) * 2; lt.tm_isdst = -1;
+    struct timespec ts[2];
+    ts[0].tv_sec = ts[1].tv_sec = mktime(&lt); ts[0].tv_nsec = ts[1].tv_nsec = 0;
+    return futimens(FD(h), ts) == 0;
+}
 bool get_time(void* h, uint16_t* d, uint16_t* t) {
     struct stat st; if (fstat(FD(h), &st) != 0) return false;
     tm_to_dos(st.st_mtime, d, t); return true;

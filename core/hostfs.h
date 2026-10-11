@@ -11,6 +11,7 @@ struct HostDirEntry {
     uint32_t size;
     uint16_t dos_date, dos_time;
     bool     readonly;
+    uint8_t  attr = 0x20;  // DOS の属性（01h 読み取り専用・02h 隠し・04h システム・20h アーカイブ。ディレクトリの 10h は含めない）
 };
 
 namespace hostfs {
@@ -30,6 +31,7 @@ namespace hostfs {
     bool  rmdir(const std::string& path);
     bool  set_time(void* h, uint16_t date, uint16_t time);
     bool  get_time(void* h, uint16_t* date, uint16_t* time);
+    bool  set_attr(const std::string& path, uint8_t attr);   // DOS の属性（R/H/S/A）を付ける
     std::string from_sjis(const std::string& s);   // ゲストの名前 → ホストの名前
     std::string to_sjis(const std::string& s);     // ホストの名前 → ゲストの名前
 }
