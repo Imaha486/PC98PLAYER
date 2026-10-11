@@ -980,7 +980,8 @@ static void dos_find_first(Machine* m) {
     s.list = dir_list(dir);
     std::sort(s.list.begin(), s.list.end(), [](const HostDirEntry& a, const HostDirEntry& b) { return a.name < b.name; });
     if (comps.size() > 1 && (attr & 0x10)) {
-        HostDirEntry dot; dot.is_dir = true; dot.size = 0; dot.dos_date = 0x2821; dot.dos_time = 0; dot.readonly = false;
+        HostDirEntry dot; dot.is_dir = true; dot.size = 0; dot.dos_date = 0x2821; dot.dos_time = 0; dot.readonly = false; dot.attr = 0;
+        { HostDirEntry ds; if (hostfs::stat(dir, ds)) { dot.dos_date = ds.dos_date; dot.dos_time = ds.dos_time; } }   // . と .. の日付はそのディレクトリのもの
         dot.name = ".."; s.list.insert(s.list.begin(), dot);
         dot.name = "."; s.list.insert(s.list.begin(), dot);
     }
@@ -1562,6 +1563,10 @@ static void int21(Machine* m) {
             ww(m, D + 0x19, 0xFFFF); ww(m, D + 0x1B, 0xFFFF); ww(m, D + 0x1D, 0xFFFF); ww(m, D + 0x1F, 0xFFFF);
             cpu_setsr(c, DS_, DOSSEG); SETBX(m, (uint16_t)(D_DPB_FD + fu * 0x30)); SETAL(m, 0); return;
         }
+        // ゲームのフォルダは Windows のフォルダ（AH=4409h でもネットワークドライブと答える）。実機の
+        // ネットワークドライブと同じく AH=32h は失敗にする（DPB があるとファイラーなどがセクタを
+        // INT 25h で直接読もうとして「読み込みエラー」になる）。LoL から辿る DPB の鎖と AH=1Fh はそのまま
+        if (ah == 0x32) { SETAL(m, 0xFF); return; }
         cpu_setsr(c, DS_, DOSSEG); SETBX(m, D_DPB); SETAL(m, 0); return; }
     case 0x33: {
         uint8_t al = AL(m);
@@ -1672,7 +1677,10 @@ static void int21(Machine* m) {
         if (al == 0x09) {   // ドライブがリモートか: 無いドライブはエラー（使えるドライブの一覧を作るファイラーがある）
             char d = (BX(m) & 0xFF) ? (char)('A' + (BX(m) & 0xFF) - 1) : cur_drive(m);
             if (!drive_valid(m, d)) { dos_error(m, 15); return; }
-            SETDX(m, 0); dos_ok(m); return; }
+            // ゲームのフォルダ（とその SUBST）は Windows のフォルダなので、セクタを直接読めない。
+            // ネットワークドライブ（bit12）と答えると、ファイラーなどは INT 25h を使わず DOS の機能で一覧を作る
+            bool hostdrv = floppy::unit_of_letter(d) < 0;
+            SETDX(m, hostdrv ? 0x1000 : 0x0000); dos_ok(m); return; }
         if (al == 0x0E) { SETAL(m, 0); dos_ok(m); return; }
         if (al == 0x0B) { dos_ok(m); return; }
         dos_error(m, 1); return; }
@@ -2002,6 +2010,7 @@ static bool shell_dir(Machine* m, const std::string& cmd, const std::string& arg
     std::sort(lst.begin(), lst.end(), [](const HostDirEntry& x, const HostDirEntry& y) { return x.name < y.name; });
     if (!comps.empty()) {   // サブディレクトリでは . と .. も出す
         HostDirEntry dot; dot.is_dir = true; dot.size = 0; dot.dos_date = 0x2821; dot.dos_time = 0; dot.readonly = false; dot.attr = 0;
+        { HostDirEntry ds; if (hostfs::stat(hdir, ds)) { dot.dos_date = ds.dos_date; dot.dos_time = ds.dos_time; } }
         dot.name = ".."; lst.insert(lst.begin(), dot); dot.name = "."; lst.insert(lst.begin(), dot);
     }
     unsigned nfiles = 0; uint64_t total = 0; int col = 0;
