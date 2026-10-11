@@ -223,7 +223,7 @@ ExitOnEnd=0</pre></li>
   <li>2 台以上のフロッピードライブを同時に使うこと（入れられるのは 1 枚。入れ替えは F11 の画面で）</li>
   <li>DOS エクステンダ（プロテクトモード）を使うゲーム、Windows 3.1 用のソフト</li>
   <li>256 色表示（PC-9821 の PEGC）、31kHz 表示、N88-BASIC</li>
-  <li>ROM のグラフィック LIO（INT A0h-AFh）のうち、円（GCIRCLE）・塗りつぶし（GPAINT）・漢字（GPUT2）・スクロール（GROLL）。呼ばれても止まらずに「正常終了」を返しますが、描きません（点・線・箱・GGET/GPUT1 は描きます）</li>
+  <li>ROM のグラフィック LIO（INT A0h-AFh）のうち、円（GCIRCLE）・漢字（GPUT2）・スクロール（GROLL）。呼ばれても止まらずに「正常終了」を返しますが、描きません（点・線・箱・境界までの塗りつぶし（GPAINT）・GGET/GPUT1 は描きます）</li>
   <li>サウンド BIOS（INT D2h）の MML 演奏などの機能。<code>SoundBIOS=1</code> で使えるのは、レジスタ書き込み・発音・音色・音量だけです（MIDI プレーヤーの MIMPI の FM 演奏で使う分）</li>
   <li>ADPCM（スピークボード・ちびおと等）、MIDI のインテリジェントモードのうちボード側でトラックを演奏する機能</li>
   <li>CONFIG.SYS に書かれたデバイスドライバの読み込み（EMS・XMS・マウスは PC98PLAYER 側で用意します）</li>

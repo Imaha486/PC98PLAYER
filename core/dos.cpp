@@ -1100,6 +1100,25 @@ static bool fcb_find(Machine* m, bool first) {
     bool ext = mem_rb(m, p) == 0xFF;
     uint32_t f = fcb_base(m, &xattr);
     int sid;
+    if (first && ext && xattr == 0x08) {
+        // ボリュームラベル（拡張 FCB の属性が 08h だけ）: フロッピーなら円盤のラベル、ほかは「無し」
+        uint8_t dn = mem_rb(m, f);
+        char drv = dn ? (char)('A' + dn - 1) : cur_drive(m);
+        std::string lab; uint16_t ld = 0, lt = 0;
+        if (!(floppy::unit_of_letter(drv) >= 0 && fatfs::volume_label_drive(drv, &lab, &ld, &lt))) return false;
+        size_t dot = lab.find('.');
+        if (dot != std::string::npos && dot <= 8) lab = lab.substr(0, dot) + std::string(8 - dot, ' ') + lab.substr(dot + 1);   // 11 文字に戻す
+        uint32_t d = lin(s_dta_seg, s_dta_off);
+        mem_wb(m, d, 0xFF); for (int i = 1; i < 6; i++) mem_wb(m, d + i, 0); mem_wb(m, d + 6, 0x08); d += 7;
+        mem_wb(m, d, (uint8_t)(drv - 'A' + 1));
+        for (int i = 0; i < 11; i++) mem_wb(m, d + 1 + i, i < (int)lab.size() ? (uint8_t)lab[i] : ' ');
+        mem_wb(m, d + 0x0C, 0x08);
+        for (int i = 0x0D; i < 0x17; i++) mem_wb(m, d + i, 0);
+        ww(m, d + 1 + 0x16, lt); ww(m, d + 1 + 0x18, machine_file_date(m, ld));
+        ww(m, d + 1 + 0x1A, 0); ww(m, d + 1 + 0x1C, 0); ww(m, d + 1 + 0x1E, 0);
+        ww(m, f + 0x0C, 0xFFFF);   // 続き（12h）は無し
+        return true;
+    }
     if (first) {
         std::string pat;
         for (int i = 0; i < 8; i++) pat.push_back((char)mem_rb(m, f + 1 + i));
@@ -1130,21 +1149,23 @@ static bool fcb_find(Machine* m, bool first) {
         std::string g = upper_dbcs(hostfs::to_sjis(e.name));
         if (!valid83(g)) continue;
         if (e.is_dir && !(s.attr & 0x10)) continue;
+        if ((e.attr & 0x06) & ~s.attr) continue;   // 隠し・システムは、拡張 FCB で指定したときだけ
         if (!wild_match(s.pattern, g)) continue;
         ww(m, f + 0x0E, (uint16_t)s.pos);
         uint32_t d = lin(s_dta_seg, s_dta_off);
-        if (ext) { mem_wb(m, d, 0xFF); for (int i = 1; i < 6; i++) mem_wb(m, d + i, 0); mem_wb(m, d + 6, (uint8_t)(e.is_dir ? 0x10 : 0x20)); d += 7; }
+        if (ext) { mem_wb(m, d, 0xFF); for (int i = 1; i < 6; i++) mem_wb(m, d + i, 0); mem_wb(m, d + 6, dos_attr_of(e)); d += 7; }
         mem_wb(m, d, mem_rb(m, f) ? mem_rb(m, f) : (uint8_t)(cur_drive(m) - 'A' + 1));
         std::string b = g, x;
         size_t dot = g.find('.');
         if (dot != std::string::npos) { b = g.substr(0, dot); x = g.substr(dot + 1); }
         for (int i = 0; i < 8; i++) mem_wb(m, d + 1 + i, i < (int)b.size() ? (uint8_t)b[i] : ' ');
         for (int i = 0; i < 3; i++) mem_wb(m, d + 9 + i, i < (int)x.size() ? (uint8_t)x[i] : ' ');
-        mem_wb(m, d + 0x0C, (uint8_t)(e.is_dir ? 0x10 : 0x20));
-        for (int i = 0x0D; i < 0x16; i++) mem_wb(m, d + i, 0);
-        ww(m, d + 0x16, e.dos_time); ww(m, d + 0x18, machine_file_date(m, e.dos_date));
-        ww(m, d + 0x1A, 0);
-        ww(m, d + 0x1C, (uint16_t)e.size); ww(m, d + 0x1E, (uint16_t)(e.size >> 16));
+        mem_wb(m, d + 0x0C, dos_attr_of(e));
+        // ドライブ番号の次の 32 バイトがディレクトリの項目そのもの（+0Bh 属性, +16h 時刻, +18h 日付, +1Ah クラスタ, +1Ch 大きさ）
+        for (int i = 0x0D; i < 0x17; i++) mem_wb(m, d + i, 0);
+        ww(m, d + 1 + 0x16, e.dos_time); ww(m, d + 1 + 0x18, machine_file_date(m, e.dos_date));
+        ww(m, d + 1 + 0x1A, 0);
+        ww(m, d + 1 + 0x1C, (uint16_t)e.size); ww(m, d + 1 + 0x1E, (uint16_t)(e.size >> 16));
         return true;
     }
     s.used = false;
@@ -1271,13 +1292,14 @@ static void dos_open(Machine* m, const std::string& name, int mode, bool create,
         HostDirEntry st;
         bool is_file = hostfs::stat(host, st);
         if (is_file && st.is_dir) { f = Sft(); dos_error(m, 5); return; }
-        if (!create && !is_file) {
-            // 親ディレクトリがあるかでエラーコードを分ける
+        // 親ディレクトリがあるか（無ければ、作るときも開くときもエラー 3）
+        bool pe = true;
+        if (!is_file) {
             std::vector<std::string> c; split_guest(name, c, nullptr);
-            bool pe = true;
             if (c.size() > 1) host_of(m, c, c.size() - 1, &pe);
-            f = Sft(); dos_error(m, pe ? 2 : 3); return;
+            if (!pe) { f = Sft(); dos_error(m, 3); return; }
         }
+        if (!create && !is_file) { f = Sft(); dos_error(m, 2); return; }
         if (excl && is_file) { f = Sft(); dos_error(m, 0x50); return; }
         void* h = hostfs::open(host, (mode & 3) > 2 ? 2 : (mode & 3), create, trunc);
         if (!h) { f = Sft(); dos_error(m, create ? 5 : 2); return; }
@@ -1607,7 +1629,14 @@ static void int21(Machine* m) {
         bool ex; std::string h = guest_to_host(m, n, &ex, nullptr, nullptr);
         bool ok = ah == 0x39 ? hostfs::mkdir(h) : hostfs::rmdir(h);
         dir_invalidate();
-        if (ok) dos_ok(m); else dos_error(m, ah == 0x39 ? 5 : 3);
+        if (ok) { dos_ok(m); return; }
+        // 実機と同じエラー: 作るとき 親が無い=3・もうある=5、消すとき 無い=3・空でない/今のディレクトリ=5
+        HostDirEntry st; bool there = hostfs::stat(h, st);
+        if (ah == 0x39) {
+            std::vector<std::string> c; split_guest(n, c, nullptr);
+            bool pe = true; if (c.size() > 1) host_of(m, c, c.size() - 1, &pe);
+            dos_error(m, pe ? 5 : 3);
+        } else dos_error(m, there ? 5 : 3);
         return; }
     case 0x3B: {
         std::string n = read_asciiz(m, DS(m), DX(m));

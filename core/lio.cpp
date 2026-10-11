@@ -7,13 +7,14 @@
 //    （A0h〜AFh と CEh。セグメントは F990h）。プログラムによってはこの表を自分で割込みベクタへ
 //    写してから INT A0h（GINIT）を呼ぶ（Ray、ランス３など）。ここが空だと写す回数が 0（=65536 回）に
 //    なったり、0000:0000 の続きを実行したりして止まってしまう。
-//  描画の機能（GINIT・GSCREEN・GVIEW・GCOLOR1/2・GCLS・GPSET・GLINE・GGET・GPUT1・GPOINT2）は
-//  ここで VRAM に直接描く。GCIRCLE・GPAINT・GPUT2・GROLL は何もしないで正常終了を返す。
+//  描画の機能（GINIT・GSCREEN・GVIEW・GCOLOR1/2・GCLS・GPSET・GLINE・GPAINT1/2・GGET・GPUT1・GPOINT2）は
+//  ここで VRAM に直接描く。GCIRCLE・GPUT2・GROLL は何もしないで正常終了を返す。
 //  パラメータは DS:BX から読む（並びは N88-BASIC の LIO と同じ。Trace=1 で呼び出しを記録）。
 //  座標は画面の絶対座標で、GVIEW の範囲の外は描かない（はみ出しは切り取る。GPUT1/GGET は範囲外ならエラー 5）。
 // -----------------------------------------------------------------------------
 #include "machine.h"
 #include <string.h>
+#include <vector>
 
 static const uint16_t LIOSEG = 0xF990;
 static inline uint32_t lin(uint16_t s, uint16_t o) { return ((uint32_t)s << 4) + o; }
@@ -66,14 +67,14 @@ static void pset(Machine* m, int x, int y, int pal) {
     if (x < clipx1() || x > clipx2() || y < clipy1() || y > clipy2()) return;
     uint32_t a = vaddr(x, y);
     uint8_t bit = (uint8_t)(0x80 >> (x & 7));
-    uint8_t (*pl)[0x8000] = m->gvram[s_lio.access & 1];
+    uint8_t (*pl)[0x8000] = m->gvram[m->draw_bank & 1];
     for (int p = 0; p < lio_planes(); p++) { if (pal & (1 << p)) pl[p][a] |= bit; else pl[p][a] &= (uint8_t)~bit; }
 }
 static int pget(Machine* m, int x, int y) {
     uint32_t a = vaddr(x, y);
     uint8_t bit = (uint8_t)(0x80 >> (x & 7));
     int c = 0;
-    for (int p = 0; p < lio_planes(); p++) if (m->gvram[s_lio.access & 1][p][a] & bit) c |= 1 << p;
+    for (int p = 0; p < lio_planes(); p++) if (m->gvram[m->draw_bank & 1][p][a] & bit) c |= 1 << p;
     return c;
 }
 static void hline(Machine* m, int x1, int x2, int y, int pal) {
@@ -147,13 +148,13 @@ static int lio_gscreen(Machine* m, uint32_t a) {
     } else if (changed) { s_lio.pos = 0; s_lio.access = 0; }
     if (changed || mode != 0xFF) { s_lio.vx1 = 0; s_lio.vy1 = 0; s_lio.vx2 = 639; s_lio.vy2 = (int16_t)lio_maxline(); }
     m->draw_bank = s_lio.access;
-    // 表示: disp=0 で消す。それ以外は表示（バンクは上位ビット）
+    // 表示の切り替えは sw（bit1 = 消す）。disp は表示するプレーン（下位）とバンク（上位）で、
+    // 0 でも消さない（N88-BASIC の SCREEN と同じ）
+    if (sw != 0xFF) m->gdcs.display = (sw & 2) ? 0 : 1;
     if (disp != 0xFF || changed) {
         uint8_t d = disp == 0xFF ? 1 : disp;
         int bank = (d >> 4) & 1;
-        if ((d & 0x0F) == 0) m->gdcs.display = 0;
-        else {
-            m->gdcs.display = 1;
+        {
             m->disp_bank = (uint8_t)bank;
             memset(m->gdcs.pram, 0, 4);
             m->gdcs.csrform[0] = (uint8_t)((m->gdcs.csrform[0] & 0xE0) | (sm >= 2 ? 0 : 1));   // 200 ラインは CSRFORM で
@@ -283,7 +284,7 @@ static int lio_gput1(Machine* m, uint32_t a) {
                 bool v = csw ? (((on ? fgc : bgc) >> p) & 1) : on;
                 int px = x0 + x, py = y0 + y;
                 uint32_t ad = vaddr(px, py); uint8_t bit = (uint8_t)(0x80 >> (px & 7));
-                uint8_t& d = m->gvram[s_lio.access & 1][p][ad];
+                uint8_t& d = m->gvram[m->draw_bank & 1][p][ad];
                 bool cur = (d & bit) != 0, nv = cur;
                 switch (mode) {
                 case 0: nv = v; break;
@@ -298,6 +299,63 @@ static int lio_gput1(Machine* m, uint32_t a) {
         }
     }
     return 0;
+}
+// GPAINT1/2: (x,y) から、境界の色（bdpal）に囲まれた所までを塗る。tile があればその模様で
+//（模様の行と桁は GVIEW の左上を起点に数える）。塗った点は覚えておき、同じ点は 2 度塗らない
+static int paint_fill(Machine* m, int sx, int sy, int pal, int bdpal, const uint8_t* tile, int rows) {
+    int x1 = clipx1(), y1 = clipy1(), x2 = clipx2(), y2 = clipy2();
+    if (sx < x1 || sx > x2 || sy < y1 || sy > y2) return 5;
+    int planes = lio_planes();
+    std::vector<uint8_t> done((size_t)640 * 400, 0);
+    auto can = [&](int x, int y) { return !done[(size_t)y * 640 + x] && pget(m, x, y) != bdpal; };
+    auto color_at = [&](int x, int y) {
+        if (!tile) return pal;
+        const uint8_t* t = tile + ((y - y1) % rows) * planes;
+        int c = 0, bit = 0x80 >> ((x - x1) & 7);
+        for (int p = 0; p < planes; p++) if (t[p] & bit) c |= 1 << p;
+        return c;
+    };
+    if (!can(sx, sy)) return 0;
+    std::vector<std::pair<int, int>> st;
+    st.push_back({sx, sy});
+    while (!st.empty()) {
+        int x = st.back().first, y = st.back().second; st.pop_back();
+        if (!can(x, y)) continue;
+        int l = x, r = x;
+        while (l > x1 && can(l - 1, y)) l--;
+        while (r < x2 && can(r + 1, y)) r++;
+        for (int xx = l; xx <= r; xx++) { done[(size_t)y * 640 + xx] = 1; pset(m, xx, y, color_at(xx, y)); }
+        for (int dy = -1; dy <= 1; dy += 2) {
+            int ny = y + dy;
+            if (ny < y1 || ny > y2) continue;
+            bool run = false;
+            for (int xx = l; xx <= r; xx++) {
+                if (can(xx, ny)) { if (!run) { st.push_back({xx, ny}); run = true; } }
+                else run = false;
+            }
+        }
+    }
+    return 0;
+}
+static int lio_gpaint1(Machine* m, uint32_t a) {
+    int x = (int16_t)rw16(m, a), y = (int16_t)rw16(m, a + 2);
+    int pal = rb8(m, a + 4), bd = rb8(m, a + 5);
+    if (pal == 0xFF) pal = s_lio.fg;
+    if (bd == 0xFF) bd = pal;
+    if (pal >= lio_palmax() || bd >= lio_palmax()) return 5;
+    return paint_fill(m, x, y, pal, bd, nullptr, 0);
+}
+static int lio_gpaint2(Machine* m, uint32_t a) {
+    int x = (int16_t)rw16(m, a), y = (int16_t)rw16(m, a + 2);
+    int leng = rb8(m, a + 5);
+    uint32_t t = ((uint32_t)rw16(m, a + 8) << 4) + rw16(m, a + 6);
+    int bd = rb8(m, a + 10);
+    if (bd == 0xFF) bd = s_lio.fg;
+    int planes = lio_planes();
+    if (bd >= lio_palmax() || leng < planes || leng % planes) return 5;
+    uint8_t tile[256];
+    for (int i = 0; i < leng; i++) tile[i] = rb8(m, t + (uint32_t)i);
+    return paint_fill(m, x, y, 0, bd, tile, leng / planes);
 }
 static int lio_gpoint2(Machine* m, uint32_t a) {
     int x = (int16_t)rw16(m, a), y = (int16_t)rw16(m, a + 2);
@@ -328,10 +386,12 @@ void lio_hle(Machine* m, uint8_t n) {
     case 0x5: ret = lio_gcls(m); break;
     case 0x6: ret = lio_gpset(m, a); break;
     case 0x7: ret = lio_gline(m, a); break;
+    case 0x9: ret = lio_gpaint1(m, a); break;
+    case 0xA: ret = lio_gpaint2(m, a); break;
     case 0xB: ret = lio_gget(m, a); break;
     case 0xC: ret = lio_gput1(m, a); break;
     case 0xF: ret = lio_gpoint2(m, a); break;
-    default: break;   // GCIRCLE・GPAINT1/2・GPUT2・GROLL は何もしない
+    default: break;   // GCIRCLE・GPUT2・GROLL は何もしない
     }
     m->cpu.r[EAX] = (m->cpu.r[EAX] & 0xFFFF00FFu) | ((uint32_t)(ret & 0xFF) << 8);   // AH: 0=正常終了 5=引数の誤り
 }

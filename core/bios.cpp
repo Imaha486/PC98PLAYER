@@ -381,6 +381,7 @@ static void int18(Machine* m) {
     case 0x0A: {
         uint8_t al = AL(m);
         m->ram[0x53C] = al;
+        m->ram[0x53B] = (uint8_t)((al & 1) ? 19 : 15);   // 1 行の走査線数-1（カーソルの形を GDC に直接書くソフトが読む）
         m->gdcm.csrform[0] = (uint8_t)((m->gdcm.csrform[0] & 0xE0) | ((al & 1) ? 19 : 15));
         m->gdcm.csrform[1] = (uint8_t)(m->gdcm.csrform[1] & 0xE0);                       // カーソルは 0 ライン目から
         m->gdcm.csrform[2] = (uint8_t)((((al & 1) ? 19 : 15) << 3) | 3);                  // 最後のラインまで
@@ -811,6 +812,7 @@ void bios_init(Machine* m) {
     r[0x500] = 0x00;
     r[0x501] = 0x80 | 0x04;         // 8MHz 系, メモリ 640KB
     r[0x53C] = 0x00;
+    r[0x53B] = 0x0F;               // 1 行の走査線数-1（25 行）。ここに 80h を足して CSRFORM に直接書くソフトがある
     r[0x54C] = 0x4E;                // 16 色ボードあり 等
     r[0x54D] = (uint8_t)(0x40 | (m->cfg.gdc_5mhz ? 0x20 : 0x00));   // EGC あり / bit5 = GDC 5MHz を使える（DIP SW 2-8）/ bit2 = いま 5MHz
     r[0x480] = 0x00;
