@@ -270,3 +270,48 @@ extern "C" int rhythm_build_rom(uint8_t* out, int cap) {
     }
     return RHYTHM_ROM_BYTES;
 }
+
+// 本物の音（WAV から読んだ 16 ビットのサンプル）で ROM を組み立てる。pcm[k] が無い音は合成で埋める。
+//  WAV（M88・Neko Project の 2608_BD.WAV など）は ROM を展開したものなので、ROM の再生レートに
+//  戻して ADPCM-A に詰め直せば、ほぼ元の ROM と同じ音になる。長さは元の ROM の枠で切る。
+extern "C" int rhythm_build_rom_pcm(uint8_t* out, int cap, const int16_t* const* pcm, const int* len, const int* rate) {
+    if (!rhythm_build_rom(out, cap)) return 0;
+    for (int k = 0; k < 6; k++) {
+        if (!pcm || !pcm[k] || len[k] <= 0 || rate[k] <= 0) continue;
+        const Slot& s = kLayout[k];
+        int bytes = s.end - s.start + 1;
+        int n = bytes * 2;
+        // 窓付き sinc で ROM のレートへ変換する（下げるときは折り返さないよう帯域も絞る）
+        std::vector<double> v(n, 0.0);
+        double step = (double)rate[k] / s.rate, peak = 0.0;
+        double fc = step > 1.0 ? 1.0 / step : 1.0;      // 元のレートで見た遮断（ナイキスト比）
+        bool same = fabs(step - 1.0) < 0.002;            // ROM と同じレートの WAV はそのまま使う
+        const int A = 16;                                // 片側のタップ数（出力側の標本で）
+        int half = (int)ceil(A / fc);
+        for (int i = 0; i < n; i++) {
+            if (same) { if (i >= len[k]) break; v[i] = pcm[k][i] / 16.0; if (fabs(v[i]) > peak) peak = fabs(v[i]); continue; }
+            double x = i * step;
+            int c = (int)floor(x);
+            if (c - half >= len[k]) break;
+            double sum = 0.0, wsum = 0.0;
+            for (int j = c - half + 1; j <= c + half; j++) {
+                double t = (x - j) * fc;
+                double sn = fabs(t) < 1e-9 ? 1.0 : sin(kPi * t) / (kPi * t);
+                double wt = fabs(t) >= A ? 0.0 : 0.5 + 0.5 * cos(kPi * t / A);   // ハン窓
+                double h = sn * wt;
+                wsum += h;
+                if (j >= 0 && j < len[k]) sum += pcm[k][j] * h;
+            }
+            v[i] = wsum != 0.0 ? sum / wsum / 16.0 : 0.0;   // 16 ビット → 12 ビットの蓄積器
+            if (fabs(v[i]) > peak) peak = fabs(v[i]);
+        }
+        double g = peak > 2047.0 ? 2047.0 / peak : 1.0;
+        std::vector<int> q(n);
+        for (int i = 0; i < n; i++) { double x = v[i] * g; q[i] = (int)(x < 0 ? x - 0.5 : x + 0.5); }
+        std::vector<uint8_t> nib;
+        adpcm_encode(q, nib);
+        for (int i = 0; i < bytes; i++)
+            out[s.start + i] = (uint8_t)((nib[2 * i] << 4) | nib[2 * i + 1]);
+    }
+    return RHYTHM_ROM_BYTES;
+}

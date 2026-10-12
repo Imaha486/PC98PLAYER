@@ -94,6 +94,7 @@ FakeDate=1999/12/31    ; 起動した日を 1999 年 12 月 31 日にする（�
   <li><strong>「メモリスイッチのサウンドを『サウンド BIOS を切り離す』にしてください」とマニュアルにあるソフト:</strong> PC98PLAYER にはサウンド BIOS が無いので、何も設定しなくてもその状態です（Dante98 の MUSIC.COM などはそのまま鳴ります）。</li>
   <li><code>SoundBoard=26</code> と <code>SoundBoard=86</code> を切り替えてみます。</li>
   <li>ゲーム側の音源設定（「FM 音源」「MIDI」など）を確認します。ゲームの設定画面で「MIDI」が選べないときは、INI に <code>MIDI=1</code> があるか確認してください（<kbd>F11</kbd> →「S: 画面＆サウンド設定」の「MIDI を使う」にチェックを入れて保存しても同じです）。<br>「MIDI（MPU）」を選ぶと止まるゲームは、<code>MIDI=0</code> で MIDI ボードが無いのに MPU を待ち続けています。<code>MIDI=1</code> にしてください。「MIDI（RS-232C）」も <code>MIDI=1</code> のときだけ音が出ます。</li>
+  <li>ドラムがノイズになる・本物の音にならないときは、リズム音源のファイルの置き方を確かめます（<a href="ch1.html#rhythm">第一章 1-12</a>）。</li>
   <li>音が小さいときは <code>Volume=200</code> くらいまで上げてみます（FM と PCM の釣り合いは <code>FMVolume=</code>・<code>PCMVolume=</code> で）。</li>
   <li>「MIDI のときだけ曲が遅い」ときは <code>MidiSpeedFix=130</code> などを試します。</li>
   <li>Windows の音量ミキサーで PC98PLAYER がミュートになっていないか確認します。</li>

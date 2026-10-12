@@ -1086,12 +1086,13 @@ static uint8_t fcb_write_rec(Machine* m, uint32_t f, int sft, uint32_t rec, uint
     return w == n ? 0 : 1;
 }
 // FCB の機能が対象にするディレクトリ: FCB のドライブ（0=今のドライブ）のカレントディレクトリ
-static std::string fcb_dir(Machine* m, uint32_t f, bool* exists, char* drive) {
+static std::string fcb_dir(Machine* m, uint32_t f, bool* exists, char* drive, bool* subdir = nullptr) {
     uint8_t dn = mem_rb(m, f);
     std::string spec = dn ? std::string(1, (char)('A' + dn - 1)) + ":." : std::string(".");
     std::vector<std::string> comps;
     split_guest(spec, comps, nullptr);
     if (drive) *drive = s_sg_drive;
+    if (subdir) *subdir = !comps.empty();
     return host_of(m, comps, comps.size(), exists);
 }
 static bool fcb_find(Machine* m, bool first) {
@@ -1126,8 +1127,8 @@ static bool fcb_find(Machine* m, bool first) {
         std::string e; for (int i = 0; i < 3; i++) e.push_back((char)mem_rb(m, f + 9 + i));
         while (!e.empty() && e.back() == ' ') e.pop_back();
         pat += "." + e;
-        bool exists; char fdrv = 0;
-        std::string dir = fcb_dir(m, f, &exists, &fdrv);
+        bool exists, sub = false; char fdrv = 0;
+        std::string dir = fcb_dir(m, f, &exists, &fdrv, &sub);
         if (!exists) return false;
         mem_wb(m, f, (uint8_t)(fdrv - 'A' + 1));   // 見つけた項目のドライブ番号
         sid = -1;
@@ -1137,6 +1138,14 @@ static bool fcb_find(Machine* m, bool first) {
         s = Search(); s.used = true; s.attr = (uint8_t)xattr; s.pattern = pat;
         s.list = dir_list(dir);
         std::sort(s.list.begin(), s.list.end(), [](const HostDirEntry& a, const HostDirEntry& b) { return a.name < b.name; });
+        s.list.erase(std::remove_if(s.list.begin(), s.list.end(), [](const HostDirEntry& e) { return e.name == "." || e.name == ".."; }), s.list.end());
+        if (sub && (xattr & 0x10)) {
+            // サブディレクトリでは、実機と同じく先頭に . と ..（日付はそのディレクトリのもの）
+            HostDirEntry dot; dot.is_dir = true; dot.size = 0; dot.dos_date = 0x2821; dot.dos_time = 0; dot.readonly = false; dot.attr = 0;
+            { HostDirEntry ds; if (hostfs::stat(dir, ds)) { dot.dos_date = ds.dos_date; dot.dos_time = ds.dos_time; } }
+            dot.name = ".."; s.list.insert(s.list.begin(), dot);
+            dot.name = "."; s.list.insert(s.list.begin(), dot);
+        }
         ww(m, f + 0x0C, (uint16_t)sid); ww(m, f + 0x0E, 0);
     } else {
         sid = rw(m, f + 0x0C);
@@ -1146,17 +1155,27 @@ static bool fcb_find(Machine* m, bool first) {
     Search& s = s_search[sid];
     while (s.pos < s.list.size()) {
         const HostDirEntry& e = s.list[s.pos++];
-        std::string g = upper_dbcs(hostfs::to_sjis(e.name));
-        if (!valid83(g)) continue;
+        bool dots = e.name == "." || e.name == "..";
+        std::string g = dots ? e.name : upper_dbcs(hostfs::to_sjis(e.name));
+        if (!dots && !valid83(g)) continue;
         if (e.is_dir && !(s.attr & 0x10)) continue;
         if ((e.attr & 0x06) & ~s.attr) continue;   // 隠し・システムは、拡張 FCB で指定したときだけ
-        if (!wild_match(s.pattern, g)) continue;
+        if (dots) {
+            // . と .. は FCB の 11 文字の名前（".       " + "   "）と 1 文字ずつ比べる（? はどの文字にも合う）
+            std::string nm = (g + "           ").substr(0, 11), pt;
+            size_t pd = s.pattern.find('.');
+            std::string pb = s.pattern.substr(0, pd), pe = pd == std::string::npos ? "" : s.pattern.substr(pd + 1);
+            pt = (pb + "        ").substr(0, 8) + (pe + "   ").substr(0, 3);
+            bool ok = true;
+            for (int i = 0; i < 11; i++) if (pt[i] != '?' && pt[i] != nm[i]) { ok = false; break; }
+            if (!ok) continue;
+        } else if (!wild_match(s.pattern, g)) continue;
         ww(m, f + 0x0E, (uint16_t)s.pos);
         uint32_t d = lin(s_dta_seg, s_dta_off);
         if (ext) { mem_wb(m, d, 0xFF); for (int i = 1; i < 6; i++) mem_wb(m, d + i, 0); mem_wb(m, d + 6, dos_attr_of(e)); d += 7; }
         mem_wb(m, d, mem_rb(m, f) ? mem_rb(m, f) : (uint8_t)(cur_drive(m) - 'A' + 1));
         std::string b = g, x;
-        size_t dot = g.find('.');
+        size_t dot = dots ? std::string::npos : g.find('.');
         if (dot != std::string::npos) { b = g.substr(0, dot); x = g.substr(dot + 1); }
         for (int i = 0; i < 8; i++) mem_wb(m, d + 1 + i, i < (int)b.size() ? (uint8_t)b[i] : ' ');
         for (int i = 0; i < 3; i++) mem_wb(m, d + 9 + i, i < (int)x.size() ? (uint8_t)x[i] : ' ');
@@ -2022,7 +2041,7 @@ static bool shell_dir(Machine* m, const std::string& cmd, const std::string& arg
         if (spec.empty() || (ex && hostfs::stat(h, he) && he.is_dir)) {
             // ディレクトリそのもの
         } else {
-            size_t sl = spec.find_last_of("\:");
+            size_t sl = spec.find_last_of("\\:");
             pat = upper_dbcs(sl == std::string::npos ? spec : spec.substr(sl + 1));
             dirspec = sl == std::string::npos ? "" : spec.substr(0, sl + 1);
             if (pat.find('.') == std::string::npos) pat += ".*";

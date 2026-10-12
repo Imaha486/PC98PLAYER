@@ -38,6 +38,7 @@
     <li><a href="#sound">音源の設定</a></li>
     <li><a href="#memory">メモリ（EMS／XMS）の設定</a></li>
     <li><a href="#gamepad">ゲームパッド</a></li>
+    <li><a href="#rhythm">リズム音源の本物（RhythmROM）</a></li>
   </ol>
 </nav>
 
@@ -375,7 +376,7 @@ Start=A:\AUTOEXEC.BAT</pre>
   <tr><td><code>FMVolume=</code> / <code>SSGVolume=</code></td><td>100</td><td>FM 音源・SSG の音量（%）。</td></tr>
   <tr><td><code>PCMVolume=</code></td><td>100</td><td>86 ボードの PCM の音量（%）。</td></tr>
   <tr><td><code>BeepVolume=</code></td><td>50</td><td>ビープ音の音量（%）。</td></tr>
-  <tr><td><code>RhythmROM=</code></td><td>なし</td><td>リズム音源のサンプル（2608_RYM.WAV など）。無くても内蔵の合成音で鳴ります。</td></tr>
+  <tr><td><code>RhythmROM=</code></td><td>なし（自動）</td><td>リズム音源の本物。空か <code>1</code> なら、ゲームのフォルダ → PC98PLAYER.EXE のフォルダの順に、ROM（<code>ym2608_adpcm_rom.bin</code>、8192 バイト）か WAV の組（<code>2608_BD.WAV</code>・<code>2608_SD.WAV</code>・<code>2608_TOP.WAV</code>・<code>2608_HH.WAV</code>・<code>2608_TOM.WAV</code>・<code>2608_RIM.WAV</code>。リムは <code>2608_RYM.WAV</code> でも可）を探します。ファイル名を書くとそれを使います（WAV はどれか 1 つを書けば、同じフォルダの 6 つを読みます）。<code>0</code> は内蔵の合成音。見つからなければ内蔵の合成音で鳴ります。詳しくは <a href="#rhythm">1-12</a>。</td></tr>
   <tr><td><code>SampleRate=</code></td><td>44100</td><td>出力のサンプリング周波数。</td></tr>
   <tr><td><code>MIDI=</code></td><td>0</td><td>1 で MIDI 音源（MPU-PC98II 相当）を載せ、Windows の MIDI 出力へ送る。RS-232C に MIDI インターフェースをつなぐ設定のゲームも、RS-232C に送ったバイトを同じ MIDI 出力へ送る。</td></tr>
   <tr><td><code>MidiDevice=</code></td><td>-1</td><td>MIDI の出力先の番号（-1 は Windows の既定）。</td></tr>
@@ -430,6 +431,7 @@ ExitOnEnd=0</pre>
   <li>音が出ない・変な場合は <code>SoundBoard=26</code> を試してください。</li>
   <li>ゲーム側で割込み番号を設定する場合は <code>SoundIRQ=</code> を合わせます（INT0=3、INT41=10、INT5=12、INT6=13）。</li>
   <li>自動で作る INI は <code>MIDI=1</code>（MIDI 音源あり）です。ゲームによっては FM より MIDI を自動で選びます。Windows 標準の MIDI 音源は当時の音源（SC-55 や MT-32）と音色が異なるので、FM で聴きたい場合は <code>MIDI=0</code> にしてください。</li>
+  <li>ドラム（リズム音源）を本物の音で鳴らしたいときは、<a href="#rhythm">1-12. リズム音源の本物（RhythmROM）</a>を見てください。</li>
 </ul>
 
 <h2 id="memory">1-10. メモリ（EMS／XMS）の設定</h2>
@@ -480,6 +482,77 @@ JoyButton8=F1</pre>
 </div>
 <p>読めない書き方があると、起動したとき（または再起動したとき）に画面の下に知らせます。割り当てを変えたら、<kbd>F11</kbd> → <kbd>R</kbd> で読み直して試せます。</p>
 <p>ボタンの番号が分からないときは、Windows の「USB ゲーム コントローラーのセットアップ」（<code>joy.cpl</code>）の「プロパティ」で、押したボタンの番号が光ります。</p>
+
+<h2 id="rhythm">1-12. リズム音源の本物（RhythmROM）</h2>
+<p>86 ボードの音源チップ YM2608（OPNA）には、バスドラム・スネア・シンバル・ハイハット・タム・リムショットの 6 つの音（リズム音源）が、チップの中の ROM に入っています。
+PMD86・PMDB2 などのドライバで鳴らすドラムの多くは、この音を使います。</p>
+<p>この ROM はヤマハの著作物なので、PC98PLAYER には入っていません。代わりに、<strong>似せて作った音（内蔵の合成音）</strong>で鳴らします。
+本物の音で聴きたいときは、自分で用意した ROM か WAV のファイルを置きます。<strong>何も置かなくても、ドラムはちゃんと鳴ります</strong>（音色が本物と少し違うだけです）。</p>
+
+<h3>使えるファイル（どちらか 1 つ）</h3>
+<div class="tablewrap">
+<table>
+  <tr><th>種類</th><th>ファイル名</th><th>中身</th></tr>
+  <tr><td>ROM</td><td><code>ym2608_adpcm_rom.bin</code></td><td>チップの中の ROM そのもの（ちょうど 8192 バイト）。MAME などで使われている形です。</td></tr>
+  <tr><td>WAV の組</td><td><code>2608_BD.WAV</code>（バスドラム）<br><code>2608_SD.WAV</code>（スネア）<br><code>2608_TOP.WAV</code>（トップシンバル）<br><code>2608_HH.WAV</code>（ハイハット）<br><code>2608_TOM.WAV</code>（タム）<br><code>2608_RIM.WAV</code>（リムショット）</td><td>ROM の音を WAV に書き出した 6 つの組。M88・Neko Project（NP2・NP21）で使うものと同じです。リムショットは <code>2608_RYM.WAV</code> という名前でもかまいません。</td></tr>
+</table>
+</div>
+<ul>
+  <li>WAV は 6 つで 1 組です。<strong>同じフォルダに 6 つとも置いてください。</strong>足りない音は、その音だけ内蔵の合成音で鳴ります。</li>
+  <li>WAV の中身（44.1kHz・16 ビットなど）は問いません。読み込むときに ROM と同じ形に直してから使います。</li>
+  <li>ファイル名の大文字・小文字は区別しません。</li>
+  <li>ROM は 8192 バイトでなければ使えません（それより小さいファイルは読みません）。</li>
+</ul>
+
+<h3>いちばん簡単な使い方（置くだけ）</h3>
+<p><code>PC98PLAYER.INI</code> に <code>RhythmROM=</code> を書かない（または空のまま）なら、PC98PLAYER が自分で探します。</p>
+<ol class="steps">
+  <li>ROM（<code>ym2608_adpcm_rom.bin</code>）か、WAV の 6 つを用意します。</li>
+  <li><strong>PC98PLAYER.EXE と同じフォルダ</strong>に置きます。どのゲームでも本物の音になります。<br>あるゲームだけ本物にしたいときは、そのゲームのフォルダに置きます。</li>
+  <li>ゲームを起動し直します（<kbd>F11</kbd> → <kbd>R</kbd> でもかまいません）。</li>
+</ol>
+<p>探す順番は次のとおりです。最初に見つかったものを使います。</p>
+<ol>
+  <li>ゲームのフォルダの ROM</li>
+  <li>ゲームのフォルダの WAV の組</li>
+  <li>PC98PLAYER.EXE のフォルダの ROM</li>
+  <li>PC98PLAYER.EXE のフォルダの WAV の組</li>
+  <li>どれも無ければ、内蔵の合成音</li>
+</ol>
+<div class="note"><a href="#shared">EXE を 1 つだけ置いて使い回す</a>使い方なら、その 1 つの PC98PLAYER.EXE の横に置くだけで、すべてのゲームに効きます。</div>
+
+<h3>RhythmROM= の書き方</h3>
+<div class="tablewrap">
+<table>
+  <tr><th>書き方</th><th>意味</th></tr>
+  <tr><td><code>RhythmROM=</code>（空、または書かない）</td><td>上の順番で自動で探します。いちばんのおすすめです。</td></tr>
+  <tr><td><code>RhythmROM=1</code></td><td>空と同じです（自動で探す）。</td></tr>
+  <tr><td><code>RhythmROM=0</code></td><td>ファイルが置いてあっても使わず、内蔵の合成音で鳴らします。</td></tr>
+  <tr><td><code>RhythmROM=ym2608_adpcm_rom.bin</code></td><td>この ROM を使います。</td></tr>
+  <tr><td><code>RhythmROM=2608_BD.WAV</code></td><td>WAV の組を使います。<strong>6 つのうちどれか 1 つの名前</strong>を書けば、同じフォルダの 6 つをまとめて読みます。</td></tr>
+  <tr><td><code>RhythmROM=C:\EMU\RHYTHM\2608_BD.WAV</code></td><td>別の場所に置いたファイルも、場所ごと書けば使えます。</td></tr>
+  <tr><td><code>RhythmROM=C:\EMU\RHYTHM</code></td><td>フォルダの名前だけを書くと、その中の WAV の組を読みます。</td></tr>
+</table>
+</div>
+<p>ファイル名だけを書いたときは、ゲームのフォルダ → PC98PLAYER.EXE のフォルダの順に探します。</p>
+<p><code>設定INI作成.html</code> では「リズム音源の本物」の欄です。空欄なら自動で探します。「ファイルを選ぶ…」で WAV を 1 つ選べば、組として読みます。</p>
+
+<h3>うまく読めたか確かめる</h3>
+<ul>
+  <li>指定したファイルが見つからないとき・使えないときは、起動したときに画面の下に知らせます。そのときは内蔵の合成音で鳴ります。</li>
+  <li>何を使っているかを確かめたいときは、INI に <code>Trace=1</code> を書いて起動します。ゲームのフォルダにできる記録（<code>PC98PLAYER.LOG</code>）に、次のような 1 行が出ます。
+<pre>[sound] リズム音源: ROM: C:\GAMES\PC98PLAYER\ym2608_adpcm_rom.bin
+[sound] リズム音源: 2608_*.WAV（6/6 音）: C:\GAMES\PC98PLAYER
+[sound] リズム音源: 本物が見つからないので内蔵の合成音</pre></li>
+  <li>確かめ終わったら <code>Trace=1</code> は消してかまいません。</li>
+</ul>
+
+<h3>困ったとき</h3>
+<ul>
+  <li><strong>ドラムがザーッというノイズになる:</strong> ver 261012 より前の版では、WAV を指定すると ROM として読んでしまい、6 つの音がすべてノイズになりました。新しい版を使ってください。新しい版でもノイズになるときは、ROM のファイルが壊れていないか（8192 バイトか）を確かめるか、<code>RhythmROM=0</code> にして内蔵の合成音で鳴るか比べてみてください。</li>
+  <li><strong>置いたのに本物の音にならない:</strong> ファイル名（<code>ym2608_adpcm_rom.bin</code>、<code>2608_BD.WAV</code> など）が合っているか、ゲームの INI に <code>RhythmROM=0</code> が書かれていないかを確かめます。INI を直したら、<kbd>F11</kbd> → <kbd>R</kbd> で読み直してください。</li>
+  <li><strong>ドラムが鳴らない:</strong> リズム音源は 86 ボードにしかありません。<code>SoundBoard=86</code> になっているかを確かめます。また、86 ボードの PCM（<code>.P86</code> のファイル）でドラムを鳴らす曲もあります。その場合、ドラムの音は <code>RhythmROM=</code> とは関係がありません。</li>
+</ul>
 
 <div class="pager">
   <a class="prev" href="index.html"><small>← 前へ</small>目次</a>

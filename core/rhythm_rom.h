@@ -45,6 +45,10 @@ extern "C" {
 // 何度呼んでも同じ内容になる（乱数の種を固定してある）。
 int rhythm_build_rom(uint8_t* out, int cap);
 
+// 本物の音（16 ビットのサンプル、音ごとのレート）から組み立てる。順番は BD, SD, TOP, HH, TOM, RIM。
+// pcm[k] が NULL の音は合成で埋める。
+int rhythm_build_rom_pcm(uint8_t* out, int cap, const int16_t* const* pcm, const int* len, const int* rate);
+
 #ifdef __cplusplus
 }
 #endif

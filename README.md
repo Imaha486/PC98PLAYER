@@ -123,7 +123,7 @@ ExitOnEnd=1          ; ゲーム（バッチ）が終わったら窓を閉じる
 PauseInactive=0      ; 非アクティブ時に止める
 MiddleRelease=1      ; 中ボタン（ホイール）クリックでマウスを放す（0 で無効）
 MouseLockDisable=0   ; 1 でマウスを一切捕まえない（マウスを使わないソフト向け）/ 2 で捕まえずに、カーソルが画面の上にある間だけゲームへ送る（メモリエディタと併用するとき向け）
-RhythmROM=           ; 本物のリズム ROM（任意。無くても鳴ります）
+RhythmROM=           ; 本物のリズム ROM（空・1=自動で探す / 0=内蔵の合成音 / ファイル名。無くても鳴ります）
 Joystick=1           ; ゲームパッドを音源ボードのジョイスティック端子（ATARI 仕様）にあてる（0 で使わない）
 JoyDevice=0          ; 0 = 最初に見つかったもの / 1〜16 = その番号
 JoyDirection=JOY     ; 方向の行き先: JOY / CURSOR（カーソルキー）/ TENKEY / NONE。JOY+CURSOR のように重ねられる

@@ -26,7 +26,7 @@ struct PlayerSettings {
     int    sample_rate = 44100;
     int    fm_volume = 100, ssg_volume = 100, beep_volume = 50, pcm_volume = 100;
     bool   jis78 = true;       // 漢字 ROM を旧 JIS（1978）の並びにする
-    std::string rhythm_rom;    // 2608_RYM.WAV などの本物（任意）
+    std::string rhythm_rom;    // リズム音源の本物: 空・1=自動で探す / 0=内蔵の合成音 / ファイル名（ROM か 2608_*.WAV）
     int    midi_device = -1;   // MIDI=1 のときの出力先（-1 = MIDI マッパー）
 };
 
@@ -69,7 +69,10 @@ struct Player {
     std::vector<uint8_t> midi_msg;
     void midi_feed(uint8_t b);
     bool init(const PlayerSettings& s, std::string* err);
+    void load_rhythm(const std::string& spec, const std::string& root);
     std::string floppy_error;       // 起動時にフロッピーを入れられなかった理由（ホストが知らせる）
+    std::string rhythm_error;       // RhythmROM= で指定したリズム音源のファイルを読めなかった理由（ホストが知らせる）
+    std::string rhythm_info;        // リズム音源に何を使っているか（F11 の画面などで見せる）
     // ステートセーブ（スロット 0..STATE_SLOTS-1）。ファイルはゲームのフォルダの PC98PLAYER.SAV\ に置く
     bool save_state(int slot, std::string* err);
     bool load_state(int slot, std::string* err);

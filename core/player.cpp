@@ -3,6 +3,7 @@
 #include "player.h"
 #include "floppy.h"
 #include "opna_renderer.h"
+#include "rhythm_rom.h"
 #include "hostfs.h"
 #include <string.h>
 #include <stdlib.h>
@@ -200,6 +201,138 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
     return !ps->cfg.start.empty() || ps->cfg.boot_fd;
 }
 
+// ---- リズム音源の本物 ---------------------------------------------------------
+//  YM2608 のリズム 6 音は、チップの中の 8KB の ROM（ADPCM-A）。次のどちらかを渡せる。
+//   ・ROM そのもの（8192 バイト。MAME の ym2608_adpcm_rom.bin など）
+//   ・ROM を展開した WAV の組（M88・Neko Project の 2608_BD.WAV, 2608_SD.WAV, 2608_TOP.WAV,
+//     2608_HH.WAV, 2608_TOM.WAV, 2608_RIM.WAV。リムは 2608_RYM.WAV でもよい）
+//  RhythmROM= が空か 1 なら、ゲームのフォルダ → PC98PLAYER.EXE のフォルダの順に探す。0 なら内蔵の合成音。
+std::string g_app_dir;   // PC98PLAYER.EXE のあるフォルダ（ホストが設定）
+
+static std::string find_ci(const std::string& dir, const std::string& name) {
+    if (dir.empty()) return "";
+    std::vector<HostDirEntry> l;
+    if (!hostfs::list_dir(dir, l)) return "";
+    std::string un = name; for (auto& c : un) c = (char)toupper((unsigned char)c);
+    for (auto& e : l) {
+        if (e.is_dir) continue;
+        std::string n = e.name; for (auto& c : n) c = (char)toupper((unsigned char)c);
+        if (n == un) return hostfs::join(dir, e.name);
+    }
+    return "";
+}
+static bool read_whole(const std::string& path, std::vector<uint8_t>& d, size_t cap = 16u << 20) {
+    void* h = hostfs::open(path, 0, false, false);
+    if (!h) return false;
+    int64_t n = hostfs::seek(h, 0, 2); hostfs::seek(h, 0, 0);
+    if (n <= 0 || (uint64_t)n > cap) { hostfs::close(h); return false; }
+    d.resize((size_t)n);
+    int r = hostfs::read(h, d.data(), (int)n);
+    hostfs::close(h);
+    return r == (int)n;
+}
+// WAV（PCM 8/16 ビット、モノラル・ステレオ）を 16 ビットのモノラルにする
+static bool wav_decode(const std::vector<uint8_t>& d, std::vector<int16_t>& out, int* rate) {
+    auto u16 = [&](size_t o) { return (unsigned)(d[o] | (d[o + 1] << 8)); };
+    auto u32 = [&](size_t o) { return (uint32_t)(d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | ((uint32_t)d[o + 3] << 24)); };
+    if (d.size() < 12 || memcmp(d.data(), "RIFF", 4) || memcmp(d.data() + 8, "WAVE", 4)) return false;
+    unsigned fmt = 0, ch = 0, bits = 0; uint32_t sr = 0; size_t dat = 0, dlen = 0;
+    for (size_t o = 12; o + 8 <= d.size();) {
+        uint32_t len = u32(o + 4);
+        if (!memcmp(d.data() + o, "fmt ", 4) && o + 24 <= d.size()) { fmt = u16(o + 8); ch = u16(o + 10); sr = u32(o + 12); bits = u16(o + 22); }
+        else if (!memcmp(d.data() + o, "data", 4)) { dat = o + 8; dlen = len; if (dat + dlen > d.size()) dlen = d.size() - dat; }
+        o += 8 + (size_t)len + (len & 1);
+    }
+    if (fmt != 1 || !dat || !ch || !sr || (bits != 8 && bits != 16)) return false;
+    size_t fr = dlen / (ch * (bits / 8));
+    out.resize(fr);
+    for (size_t i = 0; i < fr; i++) {
+        int sum = 0;
+        for (unsigned c = 0; c < ch; c++) {
+            size_t o = dat + (i * ch + c) * (bits / 8);
+            sum += bits == 16 ? (int16_t)u16(o) : ((int)d[o] - 128) * 256;
+        }
+        out[i] = (int16_t)(sum / (int)ch);
+    }
+    *rate = (int)sr;
+    return true;
+}
+// dir にある 2608_*.WAV の組を読む。1 つも無ければ false
+static bool load_rhythm_wavs(OpnaRenderer* opna, const std::string& dir, std::string* info) {
+    static const char* const names[6][2] = { {"2608_BD.WAV", nullptr}, {"2608_SD.WAV", nullptr}, {"2608_TOP.WAV", nullptr},
+                                             {"2608_HH.WAV", nullptr}, {"2608_TOM.WAV", nullptr}, {"2608_RIM.WAV", "2608_RYM.WAV"} };
+    std::vector<int16_t> pcm[6]; const int16_t* pp[6] = {}; int len[6] = {}, rate[6] = {};
+    int got = 0; std::string miss;
+    for (int k = 0; k < 6; k++) {
+        std::string f;
+        for (int a = 0; a < 2 && f.empty(); a++) if (names[k][a]) f = find_ci(dir, names[k][a]);
+        std::vector<uint8_t> d;
+        if (!f.empty() && read_whole(f, d) && wav_decode(d, pcm[k], &rate[k]) && !pcm[k].empty()) {
+            pp[k] = pcm[k].data(); len[k] = (int)pcm[k].size(); got++;
+        } else { if (!miss.empty()) miss += "・"; miss += names[k][0]; }
+    }
+    if (!got) return false;
+    std::vector<uint8_t> rom(RHYTHM_ROM_BYTES);
+    rhythm_build_rom_pcm(rom.data(), (int)rom.size(), pp, len, rate);
+    opna->set_rhythm_rom(rom.data(), (int)rom.size());
+    *info = "2608_*.WAV（" + std::to_string(got) + "/6 音）: " + dir + (miss.empty() ? "" : "（無い音は内蔵の合成音: " + miss + "）");
+    return true;
+}
+static bool load_rhythm_romfile(OpnaRenderer* opna, const std::string& path, std::string* info, std::string* err) {
+    std::vector<uint8_t> d;
+    if (!read_whole(path, d, 1u << 20)) { if (err) *err = "読めません"; return false; }
+    if (d.size() < RHYTHM_ROM_BYTES) { if (err) *err = "大きさが " + std::to_string(d.size()) + " バイトです（ROM は 8192 バイト）"; return false; }
+    opna->set_rhythm_rom(d.data(), RHYTHM_ROM_BYTES);
+    *info = "ROM: " + path;
+    return true;
+}
+void Player::load_rhythm(const std::string& spec0, const std::string& root) {
+    std::string spec = spec0;
+    while (!spec.empty() && (spec.back() == ' ' || spec.back() == '\t')) spec.pop_back();
+    while (!spec.empty() && (spec[0] == ' ' || spec[0] == '\t')) spec.erase(0, 1);
+    rhythm_error.clear();
+    rhythm_info = "内蔵の合成音";
+    if (spec == "0") { plog("[sound] リズム音源: 内蔵の合成音（RhythmROM=0）\n"); return; }
+    std::string info;
+    if (spec.empty() || spec == "1" || spec == "AUTO" || spec == "auto") {
+        static const char* const roms[] = { "ym2608_adpcm_rom.bin", "YM2608_ADPCM_ROM.BIN", "2608_ADPCM.ROM", "RHYTHM.ROM" };
+        std::string dirs[2] = { root, g_app_dir };
+        for (auto& dir : dirs) {
+            for (auto r : roms) { std::string f = find_ci(dir, r); if (!f.empty() && load_rhythm_romfile(opna, f, &info, nullptr)) goto found; }
+            if (load_rhythm_wavs(opna, dir, &info)) goto found;
+        }
+        plog("[sound] リズム音源: 本物が見つからないので内蔵の合成音\n");
+        return;
+    } else {
+        // ファイル名: ゲームのフォルダ → EXE のフォルダ → そのまま（絶対パス）
+        std::string cand[3] = { hostfs::join(root, spec), g_app_dir.empty() ? "" : hostfs::join(g_app_dir, spec), spec };
+        std::string path;
+        for (auto& c : cand) { HostDirEntry st; if (!c.empty() && hostfs::stat(c, st)) { path = c; break; } }
+        if (path.empty()) { rhythm_error = "リズム音源のファイルが見つかりません: " + spec + "（内蔵の合成音で鳴らします）"; plog("[sound] %s\n", rhythm_error.c_str()); return; }
+        HostDirEntry st; hostfs::stat(path, st);
+        if (st.is_dir) { if (load_rhythm_wavs(opna, path, &info)) goto found; rhythm_error = "リズム音源のフォルダに 2608_*.WAV がありません: " + spec; plog("[sound] %s\n", rhythm_error.c_str()); return; }
+        bool is_wav = false;
+        { void* h = hostfs::open(path, 0, false, false); if (h) { uint8_t b[4] = {}; is_wav = hostfs::read(h, b, 4) == 4 && !memcmp(b, "RIFF", 4); hostfs::close(h); } }
+        if (is_wav) {
+            // WAV は 1 つ指定されても、同じフォルダの 6 つの組として読む
+            size_t sl = path.find_last_of("/\\");
+            std::string dir = sl == std::string::npos ? std::string(".") : path.substr(0, sl);
+            if (load_rhythm_wavs(opna, dir, &info)) goto found;
+            rhythm_error = "リズム音源の WAV を読めません: " + spec;
+        } else {
+            std::string e;
+            if (load_rhythm_romfile(opna, path, &info, &e)) goto found;
+            rhythm_error = "リズム音源の ROM を使えません: " + spec + "（" + e + "）";
+        }
+        rhythm_error += "（内蔵の合成音で鳴らします）";
+        plog("[sound] %s\n", rhythm_error.c_str());
+        return;
+    }
+found:
+    rhythm_info = info;
+    plog("[sound] リズム音源: %s\n", info.c_str());
+}
+
 bool Player::init(const PlayerSettings& s, std::string* err) {
     ps = s;
     fontrom_set_jis78(ps.jis78);
@@ -217,17 +350,7 @@ bool Player::init(const PlayerSettings& s, std::string* err) {
     opna = new OpnaRenderer();
     opna->init(MASTER_CLOCK, ps.sample_rate);
     opna->set_balance(1.0 * ps.fm_volume / 100.0, 0.20 * ps.ssg_volume / 100.0);
-    if (!ps.rhythm_rom.empty()) {
-        std::string path = ps.rhythm_rom;
-        void* h = hostfs::open(hostfs::join(ps.cfg.root, path), 0, false, false);
-        if (!h) h = hostfs::open(path, 0, false, false);
-        if (h) {
-            std::vector<uint8_t> d(0x2000);
-            int n = hostfs::read(h, d.data(), (int)d.size());
-            hostfs::close(h);
-            if (n > 0) opna->set_rhythm_rom(d.data(), n);
-        }
-    }
+    load_rhythm(ps.rhythm_rom, ps.cfg.root);
     floppy::eject_unit(1);
     if (!ps.cfg.floppy_image2.empty()) {   // 2 台目のドライブ
         std::string e;

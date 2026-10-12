@@ -105,6 +105,7 @@ int main(int argc, char** argv) {
     if (trace) ps.cfg.trace = trace;
     Player* p = new Player();
     std::string err;
+    { extern std::string g_app_dir; if (getenv("APPDIR")) g_app_dir = getenv("APPDIR"); }   // PC98PLAYER.EXE のフォルダの代わり
     if (getenv("MIDI")) ps.cfg.midi = 1;
     if (getenv("NOEMS")) ps.cfg.ems = false;
     if (getenv("NOXMS")) ps.cfg.xms_kb = 0;

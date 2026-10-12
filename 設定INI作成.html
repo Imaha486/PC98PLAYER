@@ -172,8 +172,9 @@ const SCHEMA = [
     { key: "SSGVolume", label: "SSG の音量", type: "number", def: "100", min: 0, max: 1000, unit: "%" },
     { key: "PCMVolume", label: "86 ボードの PCM の音量", type: "number", def: "100", min: 0, max: 1000, unit: "%" },
     { key: "BeepVolume", label: "ビープ音の音量", type: "number", def: "50", min: 0, max: 1000, unit: "%" },
-    { key: "RhythmROM", label: "リズム音源のサンプル", type: "file", def: "", accept: ".wav,.WAV",
-      help: "2608_RYM.WAV など。無くても内蔵の合成音で鳴ります。" },
+    { key: "RhythmROM", label: "リズム音源の本物（YM2608 のリズム ROM）", type: "file", def: "", accept: ".bin,.BIN,.rom,.ROM,.wav,.WAV",
+      ph: "空欄＝自動で探す（0 は内蔵の合成音）",
+      help: "空欄（または 1）なら、ゲームのフォルダ → PC98PLAYER.EXE のフォルダの順に、ROM（ym2608_adpcm_rom.bin・8192 バイト）か WAV の組（2608_BD.WAV・2608_SD.WAV・2608_TOP.WAV・2608_HH.WAV・2608_TOM.WAV・2608_RIM.WAV。リムは 2608_RYM.WAV でも可）を探して使います。WAV はどれか 1 つを選べば、同じフォルダの 6 つをまとめて読みます。見つからなければ内蔵の合成音で鳴ります。0 にすると、置いてあっても内蔵の合成音を使います。" },
     { key: "SampleRate", label: "サンプリング周波数", type: "select", def: "44100", options: [["44100","44100 Hz"],["48000","48000 Hz"],["22050","22050 Hz"]] },
     { key: "MIDI", label: "MIDI", type: "check", def: "1", on: "1", off: "0", text: "MIDI 音源（MPU-PC98II 相当）を載せる",
       help: "Windows の MIDI 出力へ送ります。RS-232C に MIDI インターフェースをつなぐ設定のゲームも鳴ります。外すと、ゲームで MIDI を選んでも鳴りません（FM で聴きたいのにゲームが MIDI を選んでしまうときは外します）。ゲーム中に F11 →「S: 画面＆サウンド設定」でも切り替えられます。" },
@@ -297,7 +298,7 @@ function buildItem(it) {
       ctl.append(box);
       break; }
     case "file": {
-      const txt = el("input", { type: "text", value: it.def, placeholder: "ファイル名（ゲームのフォルダからの相対パス）" });
+      const txt = el("input", { type: "text", value: it.def, placeholder: it.ph || "ファイル名（ゲームのフォルダからの相対パス）" });
       txt.addEventListener("input", () => set(txt.value.trim()));
       const pick = el("input", { type: "file", accept: it.accept || "", hidden: "" });
       pick.addEventListener("change", () => { if (pick.files[0]) { txt.value = pick.files[0].name; set(txt.value); } });
