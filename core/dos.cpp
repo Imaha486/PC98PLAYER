@@ -11,6 +11,7 @@
 #include "machine.h"
 #include "hostfs.h"
 #include "floppy.h"
+#include "isofs.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -41,6 +42,7 @@ static const uint16_t D_SWITCHAR  = 0x0080;
 static const uint16_t D_UPCASE    = 0x0090;   // 大文字化関数（far ret）
 static const uint16_t D_COUNTRY   = 0x00A0;
 static const uint16_t D_NAMEBUF   = 0x0100;
+static const uint16_t D_CDDEV     = 0x00D0;   // CD-ROM の装置ヘッダ（MSCDEX が返す。18h バイト）
 static const uint16_t D_DPB       = 0x0740;   // ゲームのドライブの DPB（21h バイト、DOS 4+ 形式）
 static const uint16_t D_BLKDEV    = 0x0770;   // その DPB が指すブロック装置のヘッダ（実体は無い）
 static const uint16_t D_DPB_FD    = 0x07C0;   // フロッピーのドライブの DPB（ユニットごとに 30h バイト）
@@ -210,11 +212,34 @@ static bool valid83(const std::string& name) {
 static uint16_t hdd_free_clusters(Machine* m) { return (uint16_t)(m->cfg.free_mb * 64); }
 static uint16_t hdd_total_clusters(Machine* m) { uint32_t t = (uint32_t)m->cfg.free_mb * 64 + 2048; if (t < 8192) t = 8192; if (t > 0xFFF0) t = 0xFFF0; return (uint16_t)t; }
 static char cur_drive(Machine* m) { return s_curdrv ? s_curdrv : m->cfg.drive; }
-static bool drive_valid(Machine* m, char d) { return d == m->cfg.drive || floppy::unit_of_letter(d) >= 0 || s_subst.count(d); }
+// CD-ROM のドライブ（CDROM= で入れたイメージかフォルダ）。無ければ 0
+static std::string s_cd_folder;   // フォルダを CD-ROM として入れたとき、そのホストのパス
+static char cd_letter(Machine* m) {
+    if (m->cfg.cd_drive == m->cfg.drive || floppy::unit_of_letter(m->cfg.cd_drive) >= 0) return 0;
+    return (isofs::mounted() || !s_cd_folder.empty()) ? m->cfg.cd_drive : 0;
+}
+static bool drive_valid(Machine* m, char d) { return d == m->cfg.drive || floppy::unit_of_letter(d) >= 0 || s_subst.count(d) || (d && d == cd_letter(m)); }
+static std::string s_cdcwd;    // CD-ROM のドライブのカレント
 static std::string& cwd_of(Machine* m, char d) {
     if (d == m->cfg.drive) return s_cwd;
     if (s_subst.count(d)) return s_subst_cwd[d];
+    if (d && d == cd_letter(m)) return s_cdcwd;
     return floppy::unit_of_letter(d) == 1 ? s_fdcwd2 : s_fdcwd;
+}
+// ドライブのボリュームラベル（DOS の検索と同じ形: 8 文字目の後に "."）。フロッピーは円盤のラベル、
+// CD-ROM のイメージはボリューム名の先頭 11 文字。ほかは無し
+static bool drive_label(Machine* m, char d, std::string* lab, uint16_t* ld, uint16_t* lt) {
+    if (!d) return false;
+    if (floppy::unit_of_letter(d) >= 0) return fatfs::volume_label_drive(d, lab, ld, lt);
+    if (d == cd_letter(m) && isofs::mounted()) {
+        std::string n = isofs::volume_label().substr(0, 11);
+        while (!n.empty() && n.back() == ' ') n.pop_back();
+        if (n.empty()) return false;
+        if (n.size() > 8) n = n.substr(0, 8) + "." + n.substr(8);
+        *lab = n; *ld = 0x21; *lt = 0;
+        return true;
+    }
+    return false;
 }
 static const std::vector<HostDirEntry>& dir_list(const std::string& hostdir) {
     if (s_fd_change != floppy::change_count()) { s_fd_change = floppy::change_count(); s_dircache.clear(); }
@@ -277,6 +302,7 @@ static std::string drive_root(Machine* m, char d) {
     if (d == m->cfg.drive || !d) return m->cfg.root;
     { auto it = s_subst.find(d); if (it != s_subst.end()) return it->second; }   // SUBST で作ったドライブ
     if (d == floppy::drive_letter() && !floppy::folder().empty()) return floppy::folder();   // フォルダを入れたフロッピー
+    if (d && d == cd_letter(m)) return s_cd_folder.empty() ? isofs::root_path() : s_cd_folder;   // CD-ROM
     return fatfs::root_path(d);   // フロッピー（それ以外のドライブ名は何も無い扱い）
 }
 static std::string host_of(Machine* m, const std::vector<std::string>& comps, size_t upto, bool* all_exist) {
@@ -951,7 +977,7 @@ static void dos_find_first(Machine* m) {
     if (attr == 0x08) {
         // ボリュームラベル（属性が 08h だけのとき）: フロッピーのドライブなら円盤のラベルを返す（キーディスクの確認に使うゲームがある）
         std::string lab; uint16_t ld = 0, lt = 0;
-        if (s_sg_drive && floppy::unit_of_letter(s_sg_drive) >= 0 && fatfs::volume_label_drive(s_sg_drive, &lab, &ld, &lt)) {
+        if (drive_label(m, s_sg_drive, &lab, &ld, &lt)) {
             uint32_t d = lin(s_dta_seg, s_dta_off);
             mem_wb(m, d + 0, 0xA5); mem_wb(m, d + 1, 0x5A);
             ww(m, d + 2, 0xFFFF); ww(m, d + 4, 0);
@@ -1106,7 +1132,7 @@ static bool fcb_find(Machine* m, bool first) {
         uint8_t dn = mem_rb(m, f);
         char drv = dn ? (char)('A' + dn - 1) : cur_drive(m);
         std::string lab; uint16_t ld = 0, lt = 0;
-        if (!(floppy::unit_of_letter(drv) >= 0 && fatfs::volume_label_drive(drv, &lab, &ld, &lt))) return false;
+        if (!drive_label(m, drv, &lab, &ld, &lt)) return false;
         size_t dot = lab.find('.');
         if (dot != std::string::npos && dot <= 8) lab = lab.substr(0, dot) + std::string(8 - dot, ' ') + lab.substr(dot + 1);   // 11 文字に戻す
         uint32_t d = lin(s_dta_seg, s_dta_off);
@@ -1296,11 +1322,17 @@ static bool fcb_call(Machine* m, uint8_t ah) {
 }
 
 // ---- ファイル操作 ------------------------------------------------------------
+// CD-ROM のドライブのパスか（書き込み・作成・削除・名前の変更は、実機の MSCDEX と同じくエラー 5）
+static bool on_cd(Machine* m, const std::string& guest) {
+    std::vector<std::string> c; split_guest(guest, c, nullptr);
+    return s_sg_drive && s_sg_drive == cd_letter(m);
+}
 static void dos_open(Machine* m, const std::string& name, int mode, bool create, bool trunc, bool excl) {
     if (m->cfg.trace) plog("[dos] open %s mode=%d%s\n", name.c_str(), mode, create ? " create" : "");
     std::string dn = dev_name(name);
     int sft = new_sft();
     if (sft < 0) { dos_error(m, 4); return; }
+    if (dn.empty() && (create || (mode & 3) != 0) && on_cd(m, name)) { dos_error(m, 5); return; }
     Sft& f = s_sft[sft];
     if (!dn.empty()) {
         if (dn == "CON") f.kind = 2; else if (dn == "NUL") f.kind = 3; else f.kind = 4;
@@ -1579,6 +1611,7 @@ static void int21(Machine* m) {
     case 0x31: terminate(m, AL(m), 3, DX(m)); return;
     case 0x1F: case 0x32: {   // DPB の取得（ゲームのドライブと、FAT のフロッピー）
         int dr = ah == 0x1F ? (m->cfg.drive - 'A') : DL(m) == 0 ? (cur_drive(m) - 'A') : DL(m) - 1;
+        if (dr == cd_letter(m) - 'A') { SETAL(m, 0xFF); return; }   // CD-ROM（MSCDEX のドライブ）に DPB は無い
         if (dr != m->cfg.drive - 'A') {
             // フロッピーのイメージ: 起動セクタの BPB から本物の DPB を作る（INT 25h/26h で
             // ディレクトリを直接読み書きするファイラーなどが使う）
@@ -1621,6 +1654,10 @@ static void int21(Machine* m) {
     case 0x36: {
         char d = DL(m) ? (char)('A' + DL(m) - 1) : cur_drive(m);
         if (!drive_valid(m, d)) { SETAX(m, 0xFFFF); return; }
+        if (d == cd_letter(m)) {   // CD-ROM: 空きは 0（MSCDEX と同じく 2048 バイト/セクタ、1 セクタ/クラスタ）
+            uint32_t n = isofs::mounted() ? isofs::volume_sectors() : 300000;
+            SETAX(m, 1); SETBX(m, 0); SETCX(m, 2048); SETDX(m, (uint16_t)(n > 0xFFFF ? 0xFFFF : n)); return;
+        }
         if (d == floppy::drive_letter() && !floppy::folder().empty()) {   // フォルダのフロッピー: 1.25MB の 2HD らしく見せる
             SETAX(m, 1); SETBX(m, 600); SETCX(m, 1024); SETDX(m, 1221); return;
         }
@@ -1645,6 +1682,7 @@ static void int21(Machine* m) {
         SETBX(m, 81); dos_ok(m); return; }
     case 0x39: case 0x3A: {
         std::string n = read_asciiz(m, DS(m), DX(m));
+        if (on_cd(m, n)) { dos_error(m, 5); return; }
         bool ex; std::string h = guest_to_host(m, n, &ex, nullptr, nullptr);
         bool ok = ah == 0x39 ? hostfs::mkdir(h) : hostfs::rmdir(h);
         dir_invalidate();
@@ -1674,6 +1712,7 @@ static void int21(Machine* m) {
     case 0x40: dos_write(m); return;
     case 0x41: {
         std::string n = read_asciiz(m, DS(m), DX(m));
+        if (on_cd(m, n)) { dos_error(m, 5); return; }
         bool ex; std::string h = guest_to_host(m, n, &ex, nullptr, nullptr);
         if (!ex) { dos_error(m, 2); return; }
         if (hostfs::remove(h)) { dir_invalidate(); dos_ok(m); } else dos_error(m, 5);
@@ -1695,6 +1734,7 @@ static void int21(Machine* m) {
         if (!ex || !hostfs::stat(h, st)) { dos_error(m, 2); return; }
         if (AL(m) == 0) { SETCX(m, dos_attr_of(st)); SETAX(m, dos_attr_of(st)); }
         else if (AL(m) == 1) {   // 属性の変更（R/H/S/A。ディレクトリ・ボリュームラベルの属性は変えられない）
+            if (on_cd(m, n)) { dos_error(m, 5); return; }
             uint8_t na = (uint8_t)CX(m);
             if (na & 0x08) { dos_error(m, 5); return; }   // ボリュームラベルにはできない（ディレクトリの 10h は付いていてもよい）
             if (!hostfs::set_attr(h, (uint8_t)(na & 0x27))) { dos_error(m, 5); return; }
@@ -1800,6 +1840,7 @@ static void int21(Machine* m) {
     case 0x54: SETAL(m, s_verify); return;
     case 0x56: {
         std::string a = read_asciiz(m, DS(m), DX(m)), b = read_asciiz(m, ES(m), DI(m));
+        if (on_cd(m, a) || on_cd(m, b)) { dos_error(m, 5); return; }
         bool ex1, ex2;
         std::string ha = guest_to_host(m, a, &ex1, nullptr, nullptr), hb = guest_to_host(m, b, &ex2, nullptr, nullptr);
         if (!ex1) { dos_error(m, 2); return; }
@@ -2027,7 +2068,7 @@ static bool shell_dir(Machine* m, const std::string& cmd, const std::string& arg
     if (spec.size() >= 2 && spec[1] == ':') d = (char)toupper((uint8_t)spec[0]);
     if (!drive_valid(m, d)) { shell_print(m, "Invalid drive specification"); return false; }
     std::string lab; uint16_t ld = 0, lt = 0;
-    bool has_lab = floppy::unit_of_letter(d) >= 0 && fatfs::volume_label_drive(d, &lab, &ld, &lt);
+    bool has_lab = drive_label(m, d, &lab, &ld, &lt);
     shell_print(m, "");
     if (has_lab) shell_print(m, J(" ドライブ ") + d + J(": のボリュームラベルは ") + lab + J(" です"));
     else shell_print(m, J(" ドライブ ") + d + J(": にはボリュームラベルがありません"));
@@ -2091,6 +2132,7 @@ static bool shell_dir(Machine* m, const std::string& cmd, const std::string& arg
     shell_print(m, line + J(" 個のファイル ") + std::string(14 - std::min<size_t>(14, fmt_num(total).size()), ' ') + fmt_num(total) + J(" バイト"));
     uint32_t spc = 0, bps = 0, fr = 0, tot = 0; uint64_t freeb = (uint64_t)m->cfg.free_mb * 1024 * 1024;
     if (floppy::unit_of_letter(d) >= 0 && fatfs::free_space_drive(d, &spc, &bps, &fr, &tot)) freeb = (uint64_t)spc * bps * fr;
+    if (d == cd_letter(m)) freeb = 0;   // CD-ROM
     snprintf(line, sizeof(line), "%40s", fmt_num(freeb).c_str());
     shell_print(m, line + J(" バイトの空き領域"));
     shell_print(m, "");
@@ -2692,6 +2734,129 @@ static void sft_sync_guest(Machine* m) {
 }
 
 // ---- 振り分け ----------------------------------------------------------------
+// ---- CD-ROM（MSCDEX 2.10 相当） ---------------------------------------------
+//  INT 2Fh AX=15xxh。ドライブは 1 台（CDROM= で入れたイメージかフォルダ）。CD-DA（音楽トラック）は無い
+//  扱い（演奏の要求は「終わった」と答えるだけ）。
+bool dos_set_cdrom(Machine* m, const std::string& host, std::string* err) {
+    isofs::unmount(); isofs::set_readonly_folder(""); s_cd_folder.clear(); s_cdcwd.clear(); dir_invalidate();
+    if (host.empty()) return true;
+    HostDirEntry st;
+    if (!hostfs::stat(host, st)) { if (err) *err = "見つかりません"; return false; }
+    if (st.is_dir) { s_cd_folder = host; isofs::set_readonly_folder(host); }
+    else if (!isofs::mount(host, err)) return false;
+    if (m->cfg.trace) plog("[cd] CD-ROM %c: %s（%s）\n", m->cfg.cd_drive, host.c_str(),
+                           st.is_dir ? "フォルダ" : ("ISO " + isofs::volume_label()).c_str());
+    return true;
+}
+static void cd_dev_header(Machine* m) {
+    uint32_t H = lin(DOSSEG, D_CDDEV);
+    ww(m, H + 0, 0xFFFF); ww(m, H + 2, 0xFFFF); ww(m, H + 4, 0xC800);     // 文字装置・IOCTL 対応
+    ww(m, H + 6, D_BLKDEV + 0x12); ww(m, H + 8, D_BLKDEV + 0x12);           // 戦略・割込み（RETF）
+    const char* nm = "MSCD001 ";
+    for (int i = 0; i < 8; i++) mem_wb(m, H + 0x0A + i, (uint8_t)nm[i]);
+    ww(m, H + 0x12, 0); mem_wb(m, H + 0x14, (uint8_t)(cd_letter(m) - 'A' + 1)); mem_wb(m, H + 0x15, 1);
+}
+// CD のセクタを読む（フォルダの CD は生のセクタが無い）
+static bool cd_read_sector(uint32_t lba, uint8_t* out) { return isofs::mounted() && isofs::read_sector(lba, out); }
+static uint32_t cd_sectors() { return isofs::mounted() ? isofs::volume_sectors() : 300000; }
+static uint32_t redbook(uint32_t lba) {   // HSG（論理セクタ）→ Red Book（フレーム, 秒, 分）
+    lba += 150;
+    return (lba % 75) | (((lba / 75) % 60) << 8) | ((lba / 75 / 60) << 16);
+}
+static void mscdex(Machine* m) {
+    uint8_t al = AL(m);
+    char cd = cd_letter(m);
+    bool drv_ok = cd && (CX(m) & 0xFF) == cd - 'A';
+    auto bad_drive = [&]() { SETAX(m, 15); set_cf(m, true); };
+    if (m->cfg.trace) { static int k = 0; if (k < 64) { k++; plog("[cd] INT 2Fh AX=%04X BX=%04X CX=%04X DX=%04X\n", AX(m), BX(m), CX(m), DX(m)); } }
+    switch (al) {
+    case 0x00:   // 組み込み確認: 台数と先頭のドライブ
+        if (!cd) return;   // 無い（BX はそのまま 0）
+        SETBX(m, 1); SETCX(m, (uint16_t)(cd - 'A')); return;
+    case 0x01: {   // 装置の一覧: サブユニット番号と装置ヘッダの位置
+        if (!cd) return;
+        cd_dev_header(m);
+        uint32_t a = lin(ES(m), BX(m));
+        mem_wb(m, a, 0); ww(m, a + 1, D_CDDEV); ww(m, a + 3, DOSSEG);
+        return; }
+    case 0x02: case 0x03: case 0x04: {   // 著作権・概要・書誌のファイル名（主ボリューム記述子から）
+        if (!drv_ok) { bad_drive(); return; }
+        uint8_t pvd[2048] = {};
+        cd_read_sector(16, pvd);
+        uint32_t a = lin(ES(m), BX(m)); int off = al == 0x02 ? 702 : al == 0x03 ? 739 : 776;
+        for (int i = 0; i < 37; i++) mem_wb(m, a + i, pvd[off + i] == ' ' ? 0 : pvd[off + i]);
+        mem_wb(m, a + 37, 0);
+        set_cf(m, false); return; }
+    case 0x05: {   // VTOC（ボリューム記述子）の読み出し
+        if (!drv_ok) { bad_drive(); return; }
+        uint8_t sec[2048];
+        if (!cd_read_sector(16 + DX(m), sec)) { SETAX(m, 21); set_cf(m, true); return; }
+        uint32_t a = lin(ES(m), BX(m));
+        for (int i = 0; i < 2048; i++) mem_wb(m, a + i, sec[i]);
+        SETAX(m, sec[0] == 1 ? 1 : sec[0] == 0xFF ? 0xFF : 0);
+        set_cf(m, false); return; }
+    case 0x08: {   // 絶対セクタの読み出し
+        if (!drv_ok) { bad_drive(); return; }
+        uint32_t lba = ((uint32_t)SI(m) << 16) | DI(m), a = lin(ES(m), BX(m));
+        uint8_t sec[2048];
+        for (uint32_t i = 0; i < DX(m); i++) {
+            if (!cd_read_sector(lba + i, sec)) { SETAX(m, 21); set_cf(m, true); return; }
+            for (int k = 0; k < 2048; k++) mem_wb(m, a + i * 2048 + k, sec[k]);
+        }
+        set_cf(m, false); return; }
+    case 0x09: SETAX(m, drv_ok ? 5 : 15); set_cf(m, true); return;   // 絶対セクタの書き込み: できない
+    case 0x0B:   // ドライブの確認
+        SETBX(m, 0xADAD); SETAX(m, drv_ok ? 1 : 0); return;
+    case 0x0C: SETBX(m, 0x020A); return;   // 版（2.10）
+    case 0x0D: if (cd) mem_wb(m, lin(ES(m), BX(m)), (uint8_t)(cd - 'A')); return;   // ドライブ名の一覧
+    case 0x0E: if (BX(m) == 0) SETDX(m, 0x0100); set_cf(m, false); return;   // ボリューム記述子の選び方（主）
+    case 0x10: {   // 装置への要求（IOCTL・読み出し・演奏など）
+        uint32_t q = lin(ES(m), BX(m));
+        uint8_t cmd = mem_rb(m, q + 2);
+        uint16_t st = 0x0100;   // 完了
+        if (!drv_ok) st = 0x8101;   // 不明なユニット
+        else if (cmd == 3 || cmd == 12) {   // IOCTL 入力・出力
+            uint32_t cb = lin(rw(m, q + 0x10), rw(m, q + 0x0E));
+            uint8_t code = mem_rb(m, cb);
+            if (cmd == 3) switch (code) {
+                case 0: ww(m, cb + 1, D_CDDEV); ww(m, cb + 3, DOSSEG); cd_dev_header(m); break;   // 装置ヘッダ
+                case 1: ww(m, cb + 2, 0); ww(m, cb + 4, 0); break;                                // ヘッドの位置
+                case 4: { static const uint8_t ch[8] = {0, 0xFF, 1, 0xFF, 2, 0, 3, 0}; for (int i = 0; i < 8; i++) mem_wb(m, cb + 1 + i, ch[i]); break; }
+                case 5: for (int i = 1; i <= 128; i++) mem_wb(m, cb + i, 0); break;               // 装置の生データ
+                case 6: ww(m, cb + 1, 0x0316); ww(m, cb + 3, 0); break;                            // 装置の状態（扉は閉・生読み・HSG/Red Book）
+                case 7: ww(m, cb + 2, 2048); break;                                                // セクタの大きさ
+                case 8: { uint32_t n = cd_sectors(); ww(m, cb + 1, (uint16_t)n); ww(m, cb + 3, (uint16_t)(n >> 16)); break; }
+                case 9: mem_wb(m, cb + 1, 1); break;                                               // 媒体は替わっていない
+                case 10: { uint32_t lo = redbook(cd_sectors()); mem_wb(m, cb + 1, 1); mem_wb(m, cb + 2, 1);
+                           ww(m, cb + 3, (uint16_t)lo); ww(m, cb + 5, (uint16_t)(lo >> 16)); break; }   // 音楽の情報: トラック 1 だけ
+                case 11: { uint32_t t = redbook(0); ww(m, cb + 2, (uint16_t)t); ww(m, cb + 4, (uint16_t)(t >> 16));
+                           mem_wb(m, cb + 6, 0x41); break; }                                       // トラック 1 はデータ
+                case 12: for (int i = 1; i <= 10; i++) mem_wb(m, cb + i, 0); break;               // Q チャンネル
+                case 15: for (int i = 1; i <= 10; i++) mem_wb(m, cb + i, 0); break;               // 演奏の状態（止まっている）
+                default: st = 0x8103; break;
+            }
+        } else if (cmd == 128) {   // 読み出し（long）
+            uint8_t mode = mem_rb(m, q + 0x0D);
+            uint32_t a = lin(rw(m, q + 0x10), rw(m, q + 0x0E));
+            uint16_t n = rw(m, q + 0x12);
+            uint32_t start = rw(m, q + 0x14) | ((uint32_t)rw(m, q + 0x16) << 16);
+            if (mode == 1) start = (start & 0xFF) + ((start >> 8) & 0xFF) * 75 + ((start >> 16) & 0xFF) * 4500 - 150;
+            uint8_t sec[2048];
+            for (uint32_t i = 0; i < n; i++) {
+                if (!cd_read_sector(start + i, sec)) { st = 0x8108; break; }   // セクタが見つからない
+                for (int k = 0; k < 2048; k++) mem_wb(m, a + i * 2048 + k, sec[k]);
+            }
+        } else if (cmd == 13 || cmd == 14 || cmd == 130 || cmd == 131 || cmd == 132 || cmd == 133 || cmd == 136) {
+            // 開く・閉じる・先読み・シーク・演奏・停止・再開: CD-DA は無いので、すぐ「終わった」と答える
+        } else st = 0x8103;   // 不明なコマンド
+        ww(m, q + 3, st);
+        set_cf(m, false); return; }
+    default:
+        if (cd) { SETAX(m, 1); set_cf(m, true); }   // 対応していない機能
+        return;
+    }
+}
+
 void dos_hle(Machine* m, uint8_t n) {
     m->ram[lin(DOSSEG, D_INDOS)] = 1;
     switch (n) {
@@ -2740,7 +2905,8 @@ void dos_hle(Machine* m, uint8_t n) {
         break; }
     case HLE_INT2F: {
         uint16_t ax = AX(m);
-        if (xms_int2f(m)) {}
+        if ((ax & 0xFF00) == 0x1500) mscdex(m);
+        else if (xms_int2f(m)) {}
         else if (ax == 0x4300) SETAL(m, 0x00);     // XMS なし
         else if (ax == 0x1600) SETAL(m, 0x00);     // Windows なし
         else if (ax == 0x1680) SETAL(m, 0x00);
@@ -2766,7 +2932,7 @@ void dos_init(Machine* m) {
     s_sft[3].kind = 3; s_sft[3].refs = 1; s_sft[3].name = "NUL";
     s_sft[4].kind = 2; s_sft[4].refs = 1;
     s_frames.clear(); s_search.clear(); s_batch.clear(); s_env.clear();
-    s_cwd.clear(); s_dircache.clear(); s_fdcwd.clear(); s_fdcwd2.clear(); s_curdrv = 0; s_sg_drive = 0;
+    s_cwd.clear(); s_dircache.clear(); s_fdcwd.clear(); s_fdcwd2.clear(); s_cdcwd.clear(); s_curdrv = 0; s_sg_drive = 0;
     s_subst.clear(); s_subst_cwd.clear();
     keytab_default(); s_pending_input.clear();
     s_retcode = 0; s_retcode_last = 0; s_shell_wait = 0; s_shell_running = false;
@@ -2933,6 +3099,8 @@ void dos_state_save(Machine* m, StateW& w) {
     w.tag("SUBS");   // SUBST のドライブ
     w.u32((uint32_t)s_subst.size());
     for (auto& kv : s_subst) { w.pod(kv.first); w.str(kv.second); w.str(s_subst_cwd[kv.first]); }
+    w.tag("CDR1");   // CD-ROM（開いているファイルを開き直す前に入れ直す）
+    w.str(isofs::image_path()); w.str(s_cd_folder); w.str(s_cdcwd);
     if (!s_keytab_init) keytab_default();
     w.tag("KEY1");
     for (int i = 0; i < 20; i++) for (int k = 0; k < 16; k++) w.pod(s_fkey[i][k]);
@@ -2998,6 +3166,16 @@ void dos_state_load(Machine* m, StateR& r) {
             std::string h = r.str(), c = r.str();
             s_subst[d] = h; s_subst_cwd[d] = c;
         }
+    }
+    s_cdcwd.clear();
+    if (r.peek_tag("CDR1")) {
+        r.tag("CDR1");
+        std::string img = r.str(), fold = r.str(); s_cdcwd = r.str();
+        if (!img.empty() && img != isofs::image_path()) {
+            std::string e;
+            if (!isofs::mount(img, &e)) plog("[state] CD-ROM を入れ直せません: %s (%s)\n", img.c_str(), e.c_str());
+        } else if (img.empty() && isofs::mounted() && !fold.empty()) isofs::unmount();
+        if (!fold.empty()) { s_cd_folder = fold; isofs::set_readonly_folder(fold); }
     }
     keytab_default();
     if (r.peek_tag("KEY1")) {

@@ -72,6 +72,7 @@
     <ClCompile Include="core\fdreal.cpp" />
     <ClCompile Include="core\hdimage.cpp" />
     <ClCompile Include="core\fatfs.cpp" />
+    <ClCompile Include="core\isofs.cpp" />
     <ClCompile Include="core\gdcdraw.cpp" />
     <ClCompile Include="win32\main.cpp" />
   </ItemGroup>

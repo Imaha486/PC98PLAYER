@@ -716,6 +716,7 @@ static void do_reboot() {
     codeedit::on_reboot();
     menu_close();
     if (!g_p->floppy_error.empty()) show_toast(W(g_p->floppy_error));
+    else if (!g_p->cd_error.empty()) show_toast(W(g_p->cd_error));
     else if (!g_p->rhythm_error.empty()) show_toast(W(g_p->rhythm_error));
     else if (!rerr.empty()) show_toast(rerr);
     else show_toast(reloaded ? L"INI を読み直して、プログラムを起動し直しました" : L"プログラムを起動し直しました");
@@ -1745,6 +1746,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
     if (ps.fullscreen) toggle_fullscreen();
     update_title();
     if (!g_p->floppy_error.empty()) show_toast(W(g_p->floppy_error));
+    else if (!g_p->cd_error.empty()) show_toast(W(g_p->cd_error));
     else if (!g_p->rhythm_error.empty()) show_toast(W(g_p->rhythm_error));
     else if (!g_startup_note.empty()) show_toast(g_startup_note);
     if (ini.geti("PC98PLAYER.MEMORYEDITOR", 0) != 0) {   // メモリエディタを別の窓で開く（本体の窓の右に並べる）

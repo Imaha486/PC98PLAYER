@@ -39,6 +39,7 @@
     <li><a href="#memory">メモリ（EMS／XMS）の設定</a></li>
     <li><a href="#gamepad">ゲームパッド</a></li>
     <li><a href="#rhythm">リズム音源の本物（RhythmROM）</a></li>
+    <li><a href="#cdrom">CD-ROM 版のゲーム</a></li>
   </ol>
 </nav>
 
@@ -320,6 +321,15 @@ Start=A:\AUTOEXEC.BAT</pre>
 </table>
 </div>
 
+<h3>CD-ROM</h3>
+<div class="tablewrap">
+<table>
+  <tr><th>項目</th><th>既定値</th><th>説明</th></tr>
+  <tr><td><code>CDROM=</code></td><td>なし</td><td>CD のイメージ（<code>.ISO</code>・<code>.BIN</code>）か、CD の中身をコピーしたフォルダ。MSCDEX 付きの CD-ROM ドライブとして見せます（読み出しだけ。CD-DA の音楽は無し。<a href="#cdrom">1-13</a>）。</td></tr>
+  <tr><td><code>CDDrive=</code></td><td>Q</td><td>CD-ROM のドライブ名（C〜Z）。</td></tr>
+</table>
+</div>
+
 <h3>画面</h3>
 <div class="tablewrap">
 <table>
@@ -503,8 +513,6 @@ PMD86・PMDB2 などのドライバで鳴らすドラムの多くは、この音
   <li>ファイル名の大文字・小文字は区別しません。</li>
   <li>ROM は 8192 バイトでなければ使えません（それより小さいファイルは読みません）。</li>
 </ul>
-<div class="note"><strong>実機を持っていない方へのおすすめ:</strong> メモルさんのサイト（ <a href="https://sound.jp/jaime/">https://sound.jp/jaime/</a> ）の「FMPのページ」で、YM2608 のリズム音源に似せて作られた音色の WAV（6 つ）が公開されています。これを <strong>PC98PLAYER.EXE と同じフォルダに置くだけ</strong>で、内蔵の合成音よりぐっと実機に近い音でドラムが鳴るようになります。
-ファイル名が上の表（<code>2608_BD.WAV</code> など）と違うときは、表の名前に直してから置いてください。</div>
 
 <h3>いちばん簡単な使い方（置くだけ）</h3>
 <p><code>PC98PLAYER.INI</code> に <code>RhythmROM=</code> を書かない（または空のまま）なら、PC98PLAYER が自分で探します。</p>
@@ -554,6 +562,59 @@ PMD86・PMDB2 などのドライバで鳴らすドラムの多くは、この音
   <li><strong>ドラムがザーッというノイズになる:</strong> ver 261012 より前の版では、WAV を指定すると ROM として読んでしまい、6 つの音がすべてノイズになりました。新しい版を使ってください。新しい版でもノイズになるときは、ROM のファイルが壊れていないか（8192 バイトか）を確かめるか、<code>RhythmROM=0</code> にして内蔵の合成音で鳴るか比べてみてください。</li>
   <li><strong>置いたのに本物の音にならない:</strong> ファイル名（<code>ym2608_adpcm_rom.bin</code>、<code>2608_BD.WAV</code> など）が合っているか、ゲームの INI に <code>RhythmROM=0</code> が書かれていないかを確かめます。INI を直したら、<kbd>F11</kbd> → <kbd>R</kbd> で読み直してください。</li>
   <li><strong>ドラムが鳴らない:</strong> リズム音源は 86 ボードにしかありません。<code>SoundBoard=86</code> になっているかを確かめます。また、86 ボードの PCM（<code>.P86</code> のファイル）でドラムを鳴らす曲もあります。その場合、ドラムの音は <code>RhythmROM=</code> とは関係がありません。</li>
+</ul>
+
+<h2 id="cdrom">1-13. CD-ROM 版のゲーム</h2>
+<p>CD-ROM で売られていた PC-98 のゲームは、たいてい次のように動きます。</p>
+<ul>
+  <li>CD の中のインストーラが、ゲームの起動に要るファイル（小さな一部）だけをハードディスクへコピーする。</li>
+  <li>遊ぶときは CD を入れたままにして、絵や音などの大きなデータは CD から直接読む。CD-ROM ドライブは <strong>MSCDEX</strong>（CD-ROM 用の拡張機能）で <code>Q:</code> などのドライブになっている。</li>
+</ul>
+<p>PC98PLAYER は、CD から作ったイメージ（またはフォルダ）を、この MSCDEX 付きの CD-ROM ドライブとして見せます。インストールも、遊ぶときの CD の読み出しも、実機と同じ手順でできます。</p>
+
+<h3>用意するもの</h3>
+<div class="tablewrap">
+<table>
+  <tr><th>形</th><th>説明</th></tr>
+  <tr><td>ISO イメージ（<code>.ISO</code>）</td><td>CD のデータ部分を 2048 バイト/セクタで書き出したもの。いちばんのおすすめです。ImgBurn・CDBurnerXP などの書き込みソフトの「イメージの作成」や、Windows の各種ツールで作れます。</td></tr>
+  <tr><td>生のイメージ（<code>.BIN</code>）</td><td>2352 バイト/セクタで書き出したデータトラック（<code>.CUE</code> と組の <code>.BIN</code>）。データトラックが先頭にあるものに対応します。<code>.CUE</code> ではなく <code>.BIN</code> のほうを指定します。</td></tr>
+  <tr><td>フォルダ</td><td>CD の中身をエクスプローラーでそのままコピーしたフォルダ。中身を見やすい代わりに、セクタを直接読むソフトには使えません。</td></tr>
+</table>
+</div>
+<div class="note">CD-DA（音楽 CD と同じ形で入っている BGM のトラック）には対応していません。ゲームが CD-DA を演奏しようとしても、すぐに「演奏が終わった」と答えるだけで音は出ません。FM 音源や MIDI で鳴らす BGM は、これまでどおり鳴ります。</div>
+
+<h3>手順（インストーラを使う場合）</h3>
+<ol class="steps">
+  <li>ゲームのフォルダを作り、PC98PLAYER.EXE と CD のイメージ（例 <code>GAME.ISO</code>）を置きます。</li>
+  <li><code>PC98PLAYER.INI</code> を次のように書いて、PC98PLAYER.EXE を起動します。<br>
+<pre>[PC98PLAYER]
+Start=Q:\INSTALL.EXE
+CDROM=GAME.ISO</pre>
+  CD の中のインストーラの名前は、ゲームによって違います（<code>INSTALL.EXE</code>・<code>INSTALL.BAT</code>・<code>SETUP.BAT</code> など）。<code>SETUP.EXE</code> や <code>AUTORUN.INF</code> は Windows 用なので使えません。</li>
+  <li>インストーラで、インストール先のドライブにゲームのドライブ（ふつうは <code>A:</code>）を選びます。「ハードディスクではありません」「リモートドライブ」などと出ることがありますが、そのまま進めてかまいません（ゲームのフォルダは、実機のネットワークドライブと同じ扱いになっているためです）。</li>
+  <li>インストールが終わったら、<code>Start=</code> をインストーラが作ったバッチや実行ファイル（例 <code>Start=GAMES\GAME.BAT</code>）に書き換えます。<code>CDROM=</code> の行は<strong>消さずに残します</strong>（遊ぶときも CD を読むため）。<kbd>F11</kbd> → <kbd>R</kbd> で読み直して起動します。</li>
+</ol>
+
+<h3>手順（インストーラを使わない場合）</h3>
+<p>インストーラが何をコピーするかが分かっていれば、自分でコピーしてもかまいません。CD の中のファイルの一覧（<code>INSTALL.INF</code> などの説明ファイル）を見て、ハードディスクへコピーするファイルだけをゲームのフォルダに置き、<code>Start=</code> にゲームの実行ファイルを書き、<code>CDROM=</code> も書きます。</p>
+<div class="note">CD-ROM 版のゲームの多くは、起動したときに MSCDEX に問い合わせて CD-ROM ドライブを探し、そこからデータを読みます。<strong>CD の中身を全部ゲームのフォルダにコピーしても、<code>CDROM=</code> が無いと「データディスクをセットしてください」などと言われて先へ進めないことがあります。</strong>CD のイメージは、<code>CDROM=</code> で入れておいてください。</div>
+
+<h3>INI の書き方</h3>
+<div class="tablewrap">
+<table>
+  <tr><th>項目</th><th>既定値</th><th>説明</th></tr>
+  <tr><td><code>CDROM=</code></td><td>なし</td><td>CD のイメージ（<code>.ISO</code>・<code>.BIN</code>）か、CD の中身をコピーしたフォルダ。名前だけならゲームのフォルダ → PC98PLAYER.EXE のフォルダの順に探します。<code>CDROM=D:\CDIMAGE\GAME.ISO</code> のように場所ごと書いてもかまいません。</td></tr>
+  <tr><td><code>CDDrive=</code></td><td>Q</td><td>CD-ROM のドライブ名（C〜Z）。MSCDEX の既定と同じ <code>Q:</code> にしておけば、たいていのゲームで問題ありません。ゲームのドライブやフロッピーのドライブと同じ文字にすると、CD-ROM は見えなくなります。</td></tr>
+</table>
+</div>
+
+<h3>できること・できないこと</h3>
+<ul>
+  <li>CD-ROM のドライブは読み出しだけです。書き込み・削除・名前の変更・フォルダの作成は、実機と同じくエラー（アクセス拒否）になります。フォルダを CD として入れたときも、そのフォルダの中身は書き換わりません。</li>
+  <li>MSCDEX の機能（INT 2Fh AX=15xxh）のうち、ドライブの問い合わせ・ボリューム記述子とセクタの読み出し・装置への要求（状態の問い合わせ・読み出し）に対応しています。</li>
+  <li><code>DIR Q:</code> や <code>VOL Q:</code> では、CD のボリューム名が出ます。空き容量は 0 です。</li>
+  <li>CD の入れ替え（2 枚組のゲーム）には、まだ対応していません。</li>
+  <li><code>Trace=1</code> にすると、<code>PC98PLAYER.LOG</code> に <code>[cd] CD-ROM Q: …</code>（何を入れたか）と、ゲームが MSCDEX に問い合わせた内容が残ります。</li>
 </ul>
 
 <div class="pager">

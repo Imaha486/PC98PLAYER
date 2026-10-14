@@ -164,6 +164,13 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
     }
     floppy::set_gw_options(G("GWDRIVE", "A"), I("GWREVS", 3));
     floppy::set_force_wprot(I("FLOPPYWRITEPROTECT", 0) != 0);   // 1: 入れるフロッピーを必ず書き込み禁止にする   // Greaseweazle のドライブと、1 トラックを何回転読むか
+    {   // CD-ROM（MSCDEX 相当）。CDROM= にイメージかフォルダ、CDDrive= にドライブ名
+        ps->cfg.cdrom = G("CDROM", "");
+        if (ps->cfg.cdrom.empty()) ps->cfg.cdrom = G("CDROMIMAGE", "");
+        std::string dl = G("CDDRIVE", "Q");
+        char c = dl.empty() ? 'Q' : (char)toupper((unsigned char)dl[0]);
+        ps->cfg.cd_drive = (c >= 'C' && c <= 'Z') ? c : 'Q';
+    }
     {
         std::string cd = G("CURRENTDRIVE", "");
         ps->cfg.current_drive = cd.empty() ? 0 : (char)toupper((unsigned char)cd[0]);
@@ -345,6 +352,23 @@ bool Player::init(const PlayerSettings& s, std::string* err) {
         if (!floppy::insert(floppy_host_path(ps.cfg.root, ps.cfg.floppy_image), &e)) {
             floppy_error = "フロッピーイメージを入れられません: " + ps.cfg.floppy_image + "（" + e + "）";
             plog("[fd] %s\n", floppy_error.c_str());
+        }
+    }
+    cd_error.clear();
+    {   // CD-ROM（CDROM= のイメージかフォルダ。相対ならゲームのフォルダ → PC98PLAYER.EXE のフォルダから）
+        std::string cdp;
+        if (!ps.cfg.cdrom.empty()) {
+            cdp = floppy_host_path(ps.cfg.root, ps.cfg.cdrom);
+            HostDirEntry st;
+            if (!hostfs::stat(cdp, st) && !g_app_dir.empty()) {
+                std::string alt = floppy_host_path(g_app_dir, ps.cfg.cdrom);
+                if (hostfs::stat(alt, st)) cdp = alt;
+            }
+        }
+        std::string e;
+        if (!dos_set_cdrom(m, cdp, &e)) {
+            cd_error = "CD-ROM のイメージを入れられません: " + ps.cfg.cdrom + "（" + e + "）";
+            plog("[cd] %s\n", cd_error.c_str());
         }
     }
     opna = new OpnaRenderer();

@@ -160,6 +160,11 @@ const SCHEMA = [
     { key: "GWDrive", label: "Greaseweazle のドライブ", type: "select", def: "A", options: [["A","A"],["B","B"],["0","0（Shugart）"],["1","1（Shugart）"],["2","2（Shugart）"]] },
     { key: "GWRevs", label: "Greaseweazle の読む回転数", type: "number", def: "3", min: 1, max: 8, unit: "回転" },
   ]},
+  { title: "CD-ROM", note: "CD-ROM 版のゲーム向け", items: [
+    { key: "CDROM", label: "CD-ROM のイメージ", type: "file", def: "", accept: ".iso,.ISO,.bin,.BIN",
+      help: "CD から作った ISO イメージ（.ISO）か、生のデータトラック（.BIN）。CD の中身をコピーしたフォルダの名前でもかまいません。MSCDEX 付きの CD-ROM ドライブとして見せます（読み出しだけ。CD-DA の音楽トラックには対応していません）。" },
+    { key: "CDDrive", label: "CD-ROM のドライブ", type: "drive", def: "Q", help: "MSCDEX の既定と同じ Q: にしておけば、たいていのゲームで問題ありません。CD-ROM のインストーラは「最初に実行するプログラム」を Q:\\INSTALL.EXE のようにして動かせます。" },
+  ]},
   { title: "音", items: [
     { key: "SoundBoard", label: "音源ボード", type: "select", def: "86",
       options: [["86","PC-9801-86（FM 6 音＋SSG＋リズム＋PCM）"],["26","PC-9801-26K（FM 3 音＋SSG）"],["0","なし"]] },

@@ -20,6 +20,10 @@ GMPV3 Studio の「必要なデバイスの振る舞いと DOS ファンクシ�
 
 INI の `FloppyImage=` には、フロッピーイメージのほかにフォルダ名も書けます（例 `FloppyImage=DISK_A\`）。そのフォルダの中身をそのままフロッピーのドライブとして見せるので、キーディスクのファイルを確かめるだけのゲームはイメージなしで通せます（セクタ単位の読み書きはできません）。
 
+### CD-ROM 版のゲーム
+
+CD から作った ISO イメージ（.ISO）か生のデータトラック（.BIN）をゲームのフォルダに置き、INI に `CDROM=GAME.ISO` のように書くと、MSCDEX 付きの CD-ROM ドライブ（既定 `Q:`）として見せます。CD の中身をコピーしたフォルダの名前でもかまいません。CD-ROM のインストーラも `Start=Q:\INSTALL.EXE` で動かせます。CD-DA（音楽トラック）は鳴りません。詳しくは取扱説明書の第一章 1-13。
+
 ### インストールアシスタント
 
 ゲームのフォルダを用意するための次の 3 つの機能を、まとめて **インストールアシスタント** と呼びます。どれも EXE にドロップするだけで始まります。
@@ -64,7 +68,7 @@ EXE を 1 か所に置いたまま使い回す場合は、ショートカット�
 | 層 | 中身 |
 |---|---|
 | CPU | i386 リアルモードのインタプリタ（8086/V30/286 上位互換、32bit レジスタ・386 命令込み） |
-| ハードウェア | GDC（テキスト/グラフィック、200 ライン表示）、GRCG、**EGC**、16 色アナログパレット、8259、8253、キーボード、バスマウス、漢字 ROM ポート・外字、YM2608(OPNA)、**86 ボードの PCM**、**MPU-PC98II（MIDI）**・RS-232C の MIDI 出力、ROM のグラフィック LIO（INT A0h-AFh。画面設定・色・点・線・箱・塗りつぶし・PAINT（単色・タイル）・GGET/GPUT1。円・漢字の GPUT2 は未対応）、**サウンド BIOS**（INT D2h。`SoundBIOS=1`。音色は自前）、ブザーの音程の変化（BEEP 演奏）、**386 の保護モード**（GDT/LDT/IDT・32 ビットのコード。特権の検査・ページングは省略）と拡張メモリ（`ExtMemMB=`、INT 1Fh のブロック転送）、**仮想フロッピー**（D88/ベタ/FDI/NFD/SCP/HFE、実機の USB フロッピー・Greaseweazle。INT 1Bh の ID 指定読み書き・READ ID、DOS の FAT12/16 ドライブ、INT 25h/26h） |
+| ハードウェア | GDC（テキスト/グラフィック、200 ライン表示）、GRCG、**EGC**、16 色アナログパレット、8259、8253、キーボード、バスマウス、漢字 ROM ポート・外字、YM2608(OPNA)、**86 ボードの PCM**、**MPU-PC98II（MIDI）**・RS-232C の MIDI 出力、ROM のグラフィック LIO（INT A0h-AFh。画面設定・色・点・線・箱・塗りつぶし・PAINT（単色・タイル）・GGET/GPUT1。円・漢字の GPUT2 は未対応）、**サウンド BIOS**（INT D2h。`SoundBIOS=1`。音色は自前）、ブザーの音程の変化（BEEP 演奏）、**386 の保護モード**（GDT/LDT/IDT・32 ビットのコード。特権の検査・ページングは省略）と拡張メモリ（`ExtMemMB=`、INT 1Fh のブロック転送）、**仮想フロッピー**（D88/ベタ/FDI/NFD/SCP/HFE、実機の USB フロッピー・Greaseweazle。INT 1Bh の ID 指定読み書き・READ ID、DOS の FAT12/16 ドライブ、INT 25h/26h）、**CD-ROM**（ISO / BIN イメージかフォルダを MSCDEX 付きのドライブとして。読み出しだけ・CD-DA は無し） |
 | BIOS | HLE: INT 18h（キー/CRT/グラフィック）、INT 1Ch（時計/インターバルタイマ）、IRQ1、INT 33h（マウスドライバ: カーソル表示・イベントハンドラ）、INT DCh |
 | DOS | HLE: INT 21h をゲームのフォルダへ直結（ファイル・FCB・MCB メモリ管理・EXEC・常駐終了・FindFirst・SFT/List of Lists など） |
 | 拡張メモリ | HLE: **HIMEM.SYS（XMS 3.0）** と **EMM386（LIM EMS 4.0、ページフレーム D000h）** |
@@ -102,6 +106,8 @@ FloppyWriteProtect=0 ; 1: 入れるフロッピーを必ず書き込み禁止に
 GWDrive=A            ; Greaseweazle のドライブ（A / B。Shugart 接続は 0〜2）
 GWRevs=3             ; Greaseweazle で 1 トラックを何回転読むか（1〜8）
 FloppyDrive=B        ; フロッピーのドライブ名（A〜Z。Drive=B と FloppyDrive=A で入れ替えも可）。Start=B:\INSTALL.BAT のようにも書ける
+CDROM=               ; CD-ROM のイメージ（.ISO / .BIN）かフォルダ。MSCDEX 付きの CD-ROM ドライブとして見せる（読み出しだけ。CD-DA の音楽は無し）
+CDDrive=Q            ; CD-ROM のドライブ名（MSCDEX の既定と同じ Q:）。Start=Q:\INSTALL.EXE のようにも書ける
 CurrentDrive=        ; 起動時のカレントドライブ（空 = Start= のドライブ）
 CurrentDirectory=    ; 起動時のカレントディレクトリ（例 A:\NANPA\。無ければ作る）
 GDCClock=2.5         ; グラフィック GDC のクロック（DIP SW 2-8）。2.5 / 5
@@ -137,7 +143,7 @@ JoyRapid=4           ; 連射の速さ（何フレームごとに切り替える
 
 INI を書き換えたら、**F11 → R（プログラム再起動）** で INI を読み直して起動し直します（PC98PLAYER を閉じずに設定を試せます。FloppyDisk= / FloppyImage= は変えたときだけ入れ替え）。
 
-INI は Shift_JIS でも UTF-8 でも構いません。`samples\` に例があります（ランス３の 2 ドライブ構成は `rance3.INI`、Greaseweazle で吸い出したキーディスクを使うスレイヤーズ！は `slayers.INI`）。
+INI は Shift_JIS でも UTF-8 でも構いません。`samples\` に例があります（ランス３の 2 ドライブ構成は `rance3.INI`、Greaseweazle で吸い出したキーディスクを使うスレイヤーズ！は `slayers.INI`、CD-ROM 版の ISO イメージで遊ぶ例は `ed4_98cdrom.ini`）。
 
 ## 操作
 

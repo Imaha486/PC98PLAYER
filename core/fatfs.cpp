@@ -12,6 +12,7 @@
 // -----------------------------------------------------------------------------
 #include "floppy.h"
 #include "hostfs.h"
+#include "isofs.h"
 #include <string.h>
 #include <time.h>
 #include <set>
@@ -617,31 +618,37 @@ bool free_space_drive(char drive, uint32_t* spc, uint32_t* bps, uint32_t* fr, ui
 }
 } // namespace fatfs
 
-// ---- hostfs の入口（仮想パス・仮想ハンドルはフロッピーへ） --------------------------------
+// ---- hostfs の入口（仮想パス・仮想ハンドルはフロッピーと CD-ROM へ） --------------------------
 namespace hostfs {
+#define ISO_P(p) isofs::is_vpath(p)
+#define RO_P(p) (isofs::is_vpath(p) || isofs::in_readonly_folder(p))   // CD-ROM（書き込めない）
+#define ISO_H(h) isofs::is_handle(h)
 std::string join(const std::string& a, const std::string& b) {
-    if (fatfs::is_vpath(a)) { if (a.back() == '\\' || a.back() == '/') return a + b; return a + "\\" + b; }
+    if (fatfs::is_vpath(a) || ISO_P(a)) { if (a.back() == '\\' || a.back() == '/') return a + b; return a + "\\" + b; }
     return hostfs_native::join(a, b);
 }
-bool list_dir(const std::string& d, std::vector<HostDirEntry>& out) { return fatfs::is_vpath(d) ? fatfs::list_dir(d, out) : hostfs_native::list_dir(d, out); }
-bool stat(const std::string& p, HostDirEntry& e) { return fatfs::is_vpath(p) ? fatfs::stat(p, e) : hostfs_native::stat(p, e); }
-void* open(const std::string& p, int mode, bool create, bool trunc) { return fatfs::is_vpath(p) ? fatfs::open(p, mode, create, trunc) : hostfs_native::open(p, mode, create, trunc); }
-void close(void* h) { if (fatfs::is_handle(h)) fatfs::close(h); else hostfs_native::close(h); }
-int read(void* h, void* buf, int n) { return fatfs::is_handle(h) ? fatfs::read(h, buf, n) : hostfs_native::read(h, buf, n); }
-int write(void* h, const void* buf, int n) { return fatfs::is_handle(h) ? fatfs::write(h, buf, n) : hostfs_native::write(h, buf, n); }
-int64_t seek(void* h, int64_t off, int whence) { return fatfs::is_handle(h) ? fatfs::seek(h, off, whence) : hostfs_native::seek(h, off, whence); }
-bool truncate_here(void* h) { return fatfs::is_handle(h) ? fatfs::truncate_here(h) : hostfs_native::truncate_here(h); }
-bool remove(const std::string& p) { return fatfs::is_vpath(p) ? fatfs::remove(p) : hostfs_native::remove(p); }
+bool list_dir(const std::string& d, std::vector<HostDirEntry>& out) { return ISO_P(d) ? isofs::list_dir(d, out) : fatfs::is_vpath(d) ? fatfs::list_dir(d, out) : hostfs_native::list_dir(d, out); }
+bool stat(const std::string& p, HostDirEntry& e) { return ISO_P(p) ? isofs::stat(p, e) : fatfs::is_vpath(p) ? fatfs::stat(p, e) : hostfs_native::stat(p, e); }
+void* open(const std::string& p, int mode, bool create, bool trunc) {
+    if (isofs::in_readonly_folder(p) && (mode != 0 || create || trunc)) return nullptr;
+    return ISO_P(p) ? isofs::open(p, mode, create, trunc) : fatfs::is_vpath(p) ? fatfs::open(p, mode, create, trunc) : hostfs_native::open(p, mode, create, trunc); }
+void close(void* h) { if (ISO_H(h)) isofs::close(h); else if (fatfs::is_handle(h)) fatfs::close(h); else hostfs_native::close(h); }
+int read(void* h, void* buf, int n) { return ISO_H(h) ? isofs::read(h, buf, n) : fatfs::is_handle(h) ? fatfs::read(h, buf, n) : hostfs_native::read(h, buf, n); }
+int write(void* h, const void* buf, int n) { return ISO_H(h) ? -1 : fatfs::is_handle(h) ? fatfs::write(h, buf, n) : hostfs_native::write(h, buf, n); }
+int64_t seek(void* h, int64_t off, int whence) { return ISO_H(h) ? isofs::seek(h, off, whence) : fatfs::is_handle(h) ? fatfs::seek(h, off, whence) : hostfs_native::seek(h, off, whence); }
+bool truncate_here(void* h) { return ISO_H(h) ? false : fatfs::is_handle(h) ? fatfs::truncate_here(h) : hostfs_native::truncate_here(h); }
+bool remove(const std::string& p) { return RO_P(p) ? false : fatfs::is_vpath(p) ? fatfs::remove(p) : hostfs_native::remove(p); }
 bool rename(const std::string& a, const std::string& b) {
+    if (RO_P(a) || RO_P(b)) return false;
     bool va = fatfs::is_vpath(a), vb = fatfs::is_vpath(b);
     if (va != vb) return false;   // ドライブをまたぐ移動はできない（DOS でも同じ）
     return va ? fatfs::rename(a, b) : hostfs_native::rename(a, b);
 }
-bool mkdir(const std::string& p) { return fatfs::is_vpath(p) ? fatfs::mkdir(p) : hostfs_native::mkdir(p); }
-bool rmdir(const std::string& p) { return fatfs::is_vpath(p) ? fatfs::rmdir(p) : hostfs_native::rmdir(p); }
-bool set_time(void* h, uint16_t d, uint16_t t) { return fatfs::is_handle(h) ? fatfs::set_time(h, d, t) : hostfs_native::set_time(h, d, t); }
-bool get_time(void* h, uint16_t* d, uint16_t* t) { return fatfs::is_handle(h) ? fatfs::get_time(h, d, t) : hostfs_native::get_time(h, d, t); }
-bool set_attr(const std::string& p, uint8_t a) { return fatfs::is_vpath(p) ? fatfs::set_attr(p, a) : hostfs_native::set_attr(p, a); }
+bool mkdir(const std::string& p) { return RO_P(p) ? false : fatfs::is_vpath(p) ? fatfs::mkdir(p) : hostfs_native::mkdir(p); }
+bool rmdir(const std::string& p) { return RO_P(p) ? false : fatfs::is_vpath(p) ? fatfs::rmdir(p) : hostfs_native::rmdir(p); }
+bool set_time(void* h, uint16_t d, uint16_t t) { return ISO_H(h) ? false : fatfs::is_handle(h) ? fatfs::set_time(h, d, t) : hostfs_native::set_time(h, d, t); }
+bool get_time(void* h, uint16_t* d, uint16_t* t) { return ISO_H(h) ? isofs::get_time(h, d, t) : fatfs::is_handle(h) ? fatfs::get_time(h, d, t) : hostfs_native::get_time(h, d, t); }
+bool set_attr(const std::string& p, uint8_t a) { return RO_P(p) ? false : fatfs::is_vpath(p) ? fatfs::set_attr(p, a) : hostfs_native::set_attr(p, a); }
 std::string from_sjis(const std::string& s) { return hostfs_native::from_sjis(s); }
 std::string to_sjis(const std::string& s) { return hostfs_native::to_sjis(s); }
 }

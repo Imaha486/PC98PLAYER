@@ -71,6 +71,7 @@ struct Player {
     bool init(const PlayerSettings& s, std::string* err);
     void load_rhythm(const std::string& spec, const std::string& root);
     std::string floppy_error;       // 起動時にフロッピーを入れられなかった理由（ホストが知らせる）
+    std::string cd_error;           // CDROM= のイメージを入れられなかった理由（ホストが知らせる）
     std::string rhythm_error;       // RhythmROM= で指定したリズム音源のファイルを読めなかった理由（ホストが知らせる）
     std::string rhythm_info;        // リズム音源に何を使っているか（F11 の画面などで見せる）
     // ステートセーブ（スロット 0..STATE_SLOTS-1）。ファイルはゲームのフォルダの PC98PLAYER.SAV\ に置く
