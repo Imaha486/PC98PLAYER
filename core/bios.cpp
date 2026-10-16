@@ -152,6 +152,10 @@ struct Console {
 };
 static Console s_con;
 static bool s_rev_by_bg;   // 反転が 40-47 由来か（con_sgr を参照）
+// グラフモード（INT DCh CL=10h AH=0Eh DL≠0、または ESC ) 3）: 80h〜9Fh・E0h〜FFh を漢字の第 1 バイトにせず、
+// 1 バイトの文字（ブロック・罫線などのグラフ文字）としてそのまま出す。漢字モード（DL=0、ESC ) 0）で戻る
+static bool s_graph;
+static uint8_t s_esc5;    // ESC ) / ESC ( のどちらだったか
 
 static void con_cell(Machine* m, int x, int y, uint16_t code, uint8_t attr) {
     if (x < 0 || x >= 80 || y < 0 || y >= 25) return;
@@ -189,6 +193,7 @@ void console_reset(Machine* m) {
     s_con.attr = 0xE1;
     s_con.rows = 25;
     s_rev_by_bg = false;
+    s_graph = false;
     (void)m;
 }
 // 40-47（色つき反転）で付いた反転は、続く 30-37 で外れる（NEC の ANSI の振る舞い。
@@ -287,6 +292,7 @@ static void con_csi(Machine* m, char fin) {
 static void console_putc_body(Machine* m, uint8_t c);
 // MS-DOS のワークエリア 0000:071Dh が「今の表示属性」。ソフトが直接読み書きするので、ここと常にそろえる
 void console_putc(Machine* m, uint8_t c) {
+    { static int on = -1; if (on < 0) on = getenv("PC98PLAYER_CONLOG") ? 1 : 0; if (on) { if (c < 0x20 && c != 0x0D && c != 0x0A) fprintf(stderr, "<%02X>", c); else fputc(c, stderr); } }   // 調べもの: 画面への出力をそのまま出す
     con_load_state(m);
     console_putc_body(m, c);
     m->ram[0x71D] = s_con.attr;
@@ -299,7 +305,7 @@ static void console_putc_body(Machine* m, uint8_t c) {
         if (k.esc == 1) {
             if (c == '[') { k.esc = 2; k.blen = 0; k.buf[0] = 0; return; }
             if (c == '=') { k.esc = 3; return; }
-            if (c == ')' || c == '(') { k.esc = 5; return; }
+            if (c == ')' || c == '(') { k.esc = 5; s_esc5 = c; return; }
             if (c == '*') { con_clear_range(m, 0, 80 * 25); k.x = k.y = 0; k.esc = 0; return; }
             if (c == 'D') { con_newline(m); k.esc = 0; return; }
             if (c == 'E') { k.x = 0; con_newline(m); k.esc = 0; return; }
@@ -316,7 +322,7 @@ static void console_putc_body(Machine* m, uint8_t c) {
         if (k.esc == 3) { k.sy = c - 0x20; k.esc = 4; return; }
         if (k.esc == 4) { k.y = k.sy; k.x = c - 0x20; if (k.x < 0) k.x = 0; if (k.x > 79) k.x = 79;
                           if (k.y < 0) k.y = 0; if (k.y >= k.rows) k.y = k.rows - 1; k.esc = 0; con_sync_cursor(m); return; }
-        if (k.esc == 5) { k.esc = 0; return; }
+        if (k.esc == 5) { if (s_esc5 == ')') { if (c == '3') s_graph = true; else if (c == '0') s_graph = false; } k.esc = 0; return; }
     }
     if (k.sj1) {
         uint16_t jis = sjis_to_jis((uint16_t)((k.sj1 << 8) | c));
@@ -347,7 +353,7 @@ static void console_putc_body(Machine* m, uint8_t c) {
     case 0x1A: con_clear_range(m, 0, 80 * 25); k.x = k.y = 0; con_sync_cursor(m); return;
     case 0x1E: k.x = k.y = 0; con_sync_cursor(m); return;
     }
-    if ((c >= 0x81 && c <= 0x9F) || (c >= 0xE0 && c <= 0xFC)) { k.sj1 = c; return; }
+    if (!s_graph && ((c >= 0x81 && c <= 0x9F) || (c >= 0xE0 && c <= 0xFC))) { k.sj1 = c; return; }
     con_cell(m, k.x, k.y, c, k.attr);
     if (++k.x >= 80) { k.x = 0; con_newline(m); }
     con_sync_cursor(m);
@@ -654,8 +660,18 @@ static void intdc(Machine* m) {
         case 0x01: { uint32_t a = lin(m->cpu.sr[DS_], DX(m)); for (int i = 0; i < 4096; i++) { uint8_t c = mem_rb(m, a + i); if (c == '$') break; console_putc(m, c); } return; }
         case 0x02: s_con.attr = (uint8_t)DX(m); m->ram[0x71D] = s_con.attr; return;
         case 0x03: s_con.x = (uint8_t)DX(m); s_con.y = (uint8_t)(DX(m) >> 8); if (s_con.x > 79) s_con.x = 79; if (s_con.y >= s_con.rows) s_con.y = s_con.rows - 1; con_sync_cursor(m); return;
-        case 0x0A: con_clear_range(m, s_con.y * 80 + s_con.x, s_con.y * 80 + 80); return;
-        case 0x0A + 1: con_clear_range(m, 0, 80 * 25); return;
+        // 04h〜0Dh: カーソルの移動・消去・行の挿入と削除（エスケープシーケンスと同じ働き。DL が数か消す範囲）
+        case 0x04: con_newline(m); con_sync_cursor(m); return;                        // 1 行下へ（ESC D）
+        case 0x05: if (s_con.y > 0) s_con.y--; con_sync_cursor(m); return;             // 1 行上へ（ESC M）
+        case 0x06: case 0x07: case 0x08: case 0x09:
+        case 0x0A: case 0x0B: case 0x0C: case 0x0D: {
+            static const char fin[] = "ABCDJKLM";
+            snprintf(s_con.buf, sizeof(s_con.buf), "%u", (unsigned)(uint8_t)DX(m));
+            s_con.blen = (int)strlen(s_con.buf);
+            con_csi(m, fin[ah - 0x06]);
+            con_sync_cursor(m);
+            return; }
+        case 0x0E: s_graph = ((uint8_t)DX(m) & 1) != 0; return;   // 漢字モード（0）／グラフモード（1）
         default: return;
         }
     }
@@ -932,5 +948,5 @@ bool bios_boot_fd(Machine* m, std::string* why) {
 
 // ---- ステートセーブ ----------------------------------------------------------
 #include "state.h"
-void bios_state_save(StateW& w) { w.tag("BIOS"); w.pod(s_con); }
-void bios_state_load(StateR& r) { r.tag("BIOS"); r.pod(s_con); }
+void bios_state_save(StateW& w) { w.tag("BIOS"); w.pod(s_con); w.tag("BIO2"); w.pod(s_graph); }
+void bios_state_load(StateR& r) { r.tag("BIOS"); r.pod(s_con); s_graph = false; if (r.peek_tag("BIO2")) { r.tag("BIO2"); r.pod(s_graph); } }

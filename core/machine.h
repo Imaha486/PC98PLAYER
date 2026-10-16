@@ -146,6 +146,8 @@ struct Config {
     char     floppy_drive2 = 0;      // 2 台目のフロッピーのドライブ名（0 = DOS からは見せない）
     std::string cdrom;               // CD-ROM: イメージ（.ISO / .BIN）かフォルダ（ホストのパス。空なら無し）
     char     cd_drive = 'Q';         // CD-ROM のドライブ名（MSCDEX の既定と同じ Q:）
+    std::string cd_device = "MSCD001"; // CD-ROM の装置名（MSCDEX の /D: と同じ。ゲームが開いて確かめる）
+    std::string cdda_dir;            // CD-DA の音のフォルダ（ホストのパス。空なら無し）
     char     current_drive = 0;      // 起動時のカレントドライブ（0 = Start= のドライブ、無ければゲームのドライブ）
     std::string current_dir;         // 起動時のカレントディレクトリ（例 A:\NANPA\。空 = 指定なし）
     int      free_mb = 96;           // ゲームのドライブの空き容量として見せる大きさ（MB）
@@ -357,7 +359,7 @@ bool ems_enabled(Machine* m);
 // dos.cpp
 void dos_init(Machine* m);
 // CD-ROM を入れる（host はイメージかフォルダのホストのパス。空なら取り出す）。失敗したら false と理由
-bool dos_set_cdrom(Machine* m, const std::string& host, std::string* err);
+bool dos_set_cdrom(Machine* m, const std::string& host, const std::string& cdda_dir, std::string* err);
 void dos_hle(Machine* m, uint8_t n);
 void shell_start(Machine* m, const std::string& cmdline);
 // INT DCh CL=0Ch/0Dh: ファンクションキー・編集キーに割り当てた文字列の取得／設定（DOS のコンソール入力で展開する）

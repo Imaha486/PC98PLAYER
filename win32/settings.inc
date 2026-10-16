@@ -119,6 +119,7 @@ static void build_fields() {
     s_f.push_back({L"SSGVolume", K_VOL, L"SSG（PSG）", L"100", A_LIVE, {}, 0, 1000, L"%"});
     s_f.push_back({L"PCMVolume", K_VOL, L"PCM（86 音源）", L"100", A_LIVE, {}, 0, 1000, L"%"});
     s_f.push_back({L"BeepVolume", K_VOL, L"ビープ", L"50", A_LIVE, {}, 0, 1000, L"%"});
+    s_f.push_back({L"CDDAVolume", K_VOL, L"CD-DA（CD の音楽）", L"100", A_LIVE, {}, 0, 1000, L"%"});
 }
 
 // INI の今の値（無ければ既定）。チェックと数は読み方（YES / x2 など）をそろえる
@@ -188,6 +189,7 @@ static void apply_live(const Field& f) {
     }
     else if (k == L"Volume") ps.volume = clampv(v, 0, 1000);
     else if (k == L"PCMVolume") ps.pcm_volume = clampv(v, 0, 1000);
+    else if (k == L"CDDAVolume") ps.cdda_volume = clampv(v, 0, 1000);
     else if (k == L"BeepVolume") ps.beep_volume = clampv(v, 0, 1000);
     else if (k == L"FMVolume" || k == L"SSGVolume") {
         if (k == L"FMVolume") ps.fm_volume = clampv(v, 0, 1000); else ps.ssg_volume = clampv(v, 0, 1000);
@@ -550,6 +552,7 @@ static void open() {
     place_vol(L"SSGVolume", LX + 12, y4 + 22 + R);
     place_vol(L"PCMVolume", RX + 12, y4 + 22 + R);
     place_vol(L"BeepVolume", LX + 12, y4 + 22 + R * 2);
+    place_vol(L"CDDAVolume", RX + 12, y4 + 22 + R * 2);
     int y5 = y4 + 24 + 3 * R + 6 + 8;
     mk(L"STATIC", L"＊ の項目は保存後、プログラム再起動で反映されます（保存のときに尋ねます）。ほかはすぐ反映されます。",
        SS_LEFT, 0, LX + 4, y5, CW - 32, 20);

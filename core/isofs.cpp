@@ -34,6 +34,7 @@ static std::string s_path;
 static uint32_t s_secsize = 2048, s_secoff = 0;   // イメージの 1 セクタの大きさと、その中のデータの位置
 static uint32_t s_volsecs = 0;
 static int64_t s_imgsize = 0;
+static int64_t s_base = 0;    // データトラックの先頭のファイル内の位置（CUE のとき）
 static std::string s_label;
 static std::vector<Node> s_nodes;
 static std::set<void*> s_handles;
@@ -42,7 +43,7 @@ static inline uint32_t rd32(const uint8_t* p) { return (uint32_t)(p[0] | (p[1] <
 
 bool read_sector(uint32_t lba, uint8_t* out) {
     if (!s_img) return false;
-    int64_t off = (int64_t)lba * s_secsize + s_secoff;
+    int64_t off = s_base + (int64_t)lba * s_secsize + s_secoff;
     if (off + 2048 > s_imgsize) return false;
     if (hostfs_native::seek(s_img, off, 0) != off) return false;
     return hostfs_native::read(s_img, out, 2048) == 2048;
@@ -94,14 +95,14 @@ void unmount() {
     for (void* h : s_handles) delete (Fh*)h;
     s_handles.clear();
     if (s_img) hostfs_native::close(s_img);
-    s_img = nullptr; s_path.clear(); s_nodes.clear(); s_label.clear(); s_volsecs = 0;
+    s_img = nullptr; s_path.clear(); s_nodes.clear(); s_label.clear(); s_volsecs = 0; s_base = 0;
 }
 bool mounted() { return s_img != nullptr; }
 const std::string& image_path() { return s_path; }
 std::string volume_label() { return s_label; }
 uint32_t volume_sectors() { return s_volsecs; }
 
-bool mount(const std::string& host_path, std::string* err) {
+bool mount(const std::string& host_path, std::string* err, uint32_t sec_size, uint32_t sec_off, int64_t base) {
     unmount();
     void* h = hostfs_native::open(host_path, 0, false, false);
     if (!h) { if (err) *err = "開けません"; return false; }
@@ -112,8 +113,9 @@ bool mount(const std::string& host_path, std::string* err) {
     static const struct { uint32_t size, off; } kinds[] = { {2048, 0}, {2352, 16}, {2352, 24}, {2336, 8} };
     bool found = false;
     uint8_t pvd[2048];
+    s_base = base;
     for (auto& k : kinds) {
-        s_secsize = k.size; s_secoff = k.off;
+        s_secsize = sec_size ? sec_size : k.size; s_secoff = sec_size ? sec_off : k.off;
         if (read_sector(16, pvd) && pvd[0] == 1 && !memcmp(pvd + 1, "CD001", 5)) { found = true; break; }
     }
     if (!found) { unmount(); if (err) *err = "ISO 9660 のイメージではありません"; return false; }

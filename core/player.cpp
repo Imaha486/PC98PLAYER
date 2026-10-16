@@ -4,6 +4,7 @@
 #include "floppy.h"
 #include "opna_renderer.h"
 #include "rhythm_rom.h"
+#include "cdda.h"
 #include "hostfs.h"
 #include <string.h>
 #include <stdlib.h>
@@ -120,6 +121,7 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
     ps->ssg_volume = V("SSGVOLUME", 100);
     ps->beep_volume = V("BEEPVOLUME", 50);
     ps->pcm_volume = V("PCMVOLUME", 100);
+    ps->cdda_volume = V("CDDAVOLUME", 100);
     ps->fullscreen = I("FULLSCREEN", 0) != 0;
     ps->smooth = I("SMOOTH", 0) != 0;
     ps->exit_on_end = I("EXITONEND", 1) != 0;
@@ -167,6 +169,12 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
     {   // CD-ROM（MSCDEX 相当）。CDROM= にイメージかフォルダ、CDDrive= にドライブ名
         ps->cfg.cdrom = G("CDROM", "");
         if (ps->cfg.cdrom.empty()) ps->cfg.cdrom = G("CDROMIMAGE", "");
+        ps->cfg.cdda_dir = G("CDDA", "");
+        {   // 装置名（8 文字まで、大文字）
+            std::string dv = G("CDDEVICE", "MSCD001");
+            std::string u; for (char c : dv) if (c != ' ' && u.size() < 8) u.push_back((char)toupper((unsigned char)c));
+            ps->cfg.cd_device = u.empty() ? "MSCD001" : u;
+        }
         std::string dl = G("CDDRIVE", "Q");
         char c = dl.empty() ? 'Q' : (char)toupper((unsigned char)dl[0]);
         ps->cfg.cd_drive = (c >= 'C' && c <= 'Z') ? c : 'Q';
@@ -365,8 +373,17 @@ bool Player::init(const PlayerSettings& s, std::string* err) {
                 if (hostfs::stat(alt, st)) cdp = alt;
             }
         }
+        std::string cdd;   // CD-DA の音のフォルダ（相対ならゲームのフォルダ → EXE のフォルダから）
+        if (!ps.cfg.cdda_dir.empty()) {
+            cdd = floppy_host_path(ps.cfg.root, ps.cfg.cdda_dir);
+            HostDirEntry st;
+            if (!hostfs::stat(cdd, st) && !g_app_dir.empty()) {
+                std::string alt = floppy_host_path(g_app_dir, ps.cfg.cdda_dir);
+                if (hostfs::stat(alt, st)) cdd = alt;
+            }
+        }
         std::string e;
-        if (!dos_set_cdrom(m, cdp, &e)) {
+        if (!dos_set_cdrom(m, cdp, cdd, &e)) {
             cd_error = "CD-ROM のイメージを入れられません: " + ps.cfg.cdrom + "（" + e + "）";
             plog("[cd] %s\n", cd_error.c_str());
         }
@@ -520,6 +537,12 @@ void Player::run_frame(bool render_video, bool render_audio) {
             if (fabsf(yr) < 1e-9f) yr = 0;
             l += yl; r += yr;
         }
+        {   // CD-DA（MSCDEX で演奏中の音楽トラック）
+            float cl = 0, cr = 0;
+            cdda::render_one(ps.sample_rate, &cl, &cr);
+            float cv = ps.cdda_volume / 100.0f * 0.7f;
+            l += cl * cv; r += cr * cv;
+        }
         if (beep_pwm) {
             // H の割合 → -1〜+1。直流分を取り除き（スピーカーは直流を鳴らさない）、高い方を少し丸める
             float x = beep_state ? (float)(2.0 * pwm_low / step - 1.0) : 0.0f;   // L が長いほど大きい値（データの向きに合わせる）
@@ -560,6 +583,7 @@ void Player::run_frame(bool render_video, bool render_audio) {
     m->regw.clear();
     m->beepw.clear();
     if (render_audio) sample_acc -= (double)(t1 - t0);
+    else cdda::skip_seconds((double)(t1 - t0) / MASTER_CLOCK);   // 早送り: CD-DA の位置だけ進める
     if (render_video) {
         video_render(m, fb);
         // INT 33h のカーソル（AX=1 で表示にしたゲームだけ）。実機のドライバと同じ形を VRAM ではなく画面に重ねる

@@ -161,9 +161,14 @@ const SCHEMA = [
     { key: "GWRevs", label: "Greaseweazle の読む回転数", type: "number", def: "3", min: 1, max: 8, unit: "回転" },
   ]},
   { title: "CD-ROM", note: "CD-ROM 版のゲーム向け", items: [
-    { key: "CDROM", label: "CD-ROM のイメージ", type: "file", def: "", accept: ".iso,.ISO,.bin,.BIN",
-      help: "CD から作った ISO イメージ（.ISO）か、生のデータトラック（.BIN）。CD の中身をコピーしたフォルダの名前でもかまいません。MSCDEX 付きの CD-ROM ドライブとして見せます（読み出しだけ。CD-DA の音楽トラックには対応していません）。" },
+    { key: "CDROM", label: "CD-ROM のイメージ", type: "file", def: "", accept: ".cue,.CUE,.iso,.ISO,.bin,.BIN",
+      help: "CD から作ったイメージ。CD-DA（音楽トラック）も鳴らすなら CUE シート（.CUE。.BIN と同じフォルダに置く）、データだけなら ISO（.ISO）か .BIN。CD の中身をコピーしたフォルダの名前でもかまいません。MSCDEX 付きの CD-ROM ドライブとして見せます（読み出しだけ）。" },
     { key: "CDDrive", label: "CD-ROM のドライブ", type: "drive", def: "Q", help: "MSCDEX の既定と同じ Q: にしておけば、たいていのゲームで問題ありません。CD-ROM のインストーラは「最初に実行するプログラム」を Q:\\INSTALL.EXE のようにして動かせます。" },
+    { key: "CDDA", label: "CD-DA の音楽のフォルダ", type: "text", def: "", placeholder: "例: BGM（空なら使わない）",
+      help: "CD の音楽トラックを WAV・MP3・FLAC のファイルにして入れたフォルダ。ファイル名の最後の 2 桁がトラック番号です（track_02.mp3 → トラック 2、cdaudio_19.mp3 → トラック 19）。CUE シートが無いとき、または CUE の音を置き換えたいときに使います。" },
+    { key: "CDDevice", label: "CD-ROM の装置名", type: "text", def: "MSCD001", placeholder: "MSCD001",
+      help: "実機の AUTOEXEC.BAT の「MSCDEX /D:」の名前。ゲームの起動オプションで装置名を指定するゲーム（例 GAME /D:MSCD001）は、ここと同じ名前にします。ふつうは変えません。" },
+    { key: "CDDAVolume", label: "CD-DA の音量", type: "number", def: "100", min: 0, max: 1000, unit: "%" },
   ]},
   { title: "音", items: [
     { key: "SoundBoard", label: "音源ボード", type: "select", def: "86",

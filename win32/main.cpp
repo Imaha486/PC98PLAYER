@@ -1848,7 +1848,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
                 bool last = (q1.QuadPart - q0.QuadPart) >= budget || i == 63;
                 codeedit::tick();
                 g_p->run_frame(last, false);
-                if (last || g_p->m->quit) break;
+                if (last) break;
+                if (g_p->m->quit) { g_p->run_frame(true, false); break; }   // 終わった: 最後の画面を描いてから抜ける（描かずに抜けると、早送りの間は画面が止まったままに見える）
             }
             if (g_audio.queued_frames()) audio_flush();
         }

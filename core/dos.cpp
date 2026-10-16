@@ -12,6 +12,7 @@
 #include "hostfs.h"
 #include "floppy.h"
 #include "isofs.h"
+#include "cdda.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -293,6 +294,7 @@ static bool split_guest(const std::string& in, std::vector<std::string>& comps, 
             if (dot != std::string::npos) b = b.substr(0, dot);
             if (b == "CON" || b == "NUL" || b == "AUX" || b == "PRN" || b == "CLOCK$" || b == "LPT1" || b == "COM1" || (b == "EMMXXXX0" && ems_enabled(g_m)))
                 *is_dev = true;
+            if (cd_letter(g_m) && b == g_m->cfg.cd_device) *is_dev = true;   // CD-ROM の装置（MSCDEX の /D: の名前）
         }
     }
     return true;
@@ -1321,11 +1323,42 @@ static bool fcb_call(Machine* m, uint8_t ah) {
     return false;
 }
 
+static uint16_t cd_ioctl_input(Machine* m, uint32_t cb);
+static uint16_t cd_ioctl_output(Machine* m, uint32_t cb);
 // ---- ファイル操作 ------------------------------------------------------------
 // CD-ROM のドライブのパスか（書き込み・作成・削除・名前の変更は、実機の MSCDEX と同じくエラー 5）
 static bool on_cd(Machine* m, const std::string& guest) {
     std::vector<std::string> c; split_guest(guest, c, nullptr);
     return s_sg_drive && s_sg_drive == cd_letter(m);
+}
+// 起動ドライブの AUTOEXEC.BAT・CONFIG.SYS が無いとき、読み出しだけ「それらしい中身」を見せる。
+// 実機では起動ドライブにあるのが当たり前なので、MSCDEX の装置名（/D:）や組み込まれたドライバを
+// ここから読み取るインストーラがある（無いと「MSCDEX を探せませんでした」で止まる）。
+// 中身は今の設定（EMS・XMS・CD-ROM）どおり。ファイルは PC98PLAYER.SAV\ に作って、それを開く
+static std::string virtual_sysfile(Machine* m, const std::string& canon) {
+    char d = m->cfg.drive;
+    std::string t;
+    if (canon == "CONFIG.SYS") {
+        t = "FILES=30\r\nBUFFERS=20\r\n";
+        if (m->cfg.xms_kb) t += std::string("DEVICE=") + d + ":\\DOS\\HIMEM.SYS\r\n";
+        if (m->cfg.ems) t += std::string("DEVICE=") + d + ":\\DOS\\EMM386.EXE /UMB\r\n";
+        t += "DOS=HIGH,UMB\r\n";
+        if (cd_letter(m)) t += std::string("DEVICE=") + d + ":\\DOS\\NECCDD.SYS /D:" + m->cfg.cd_device + "\r\n";
+        t += "LASTDRIVE=Z\r\n";
+    } else if (canon == "AUTOEXEC.BAT") {
+        t = std::string("@ECHO OFF\r\nPATH ") + d + ":\\;" + d + ":\\DOS\r\n";
+        if (cd_letter(m)) t += std::string(1, d) + ":\\DOS\\MSCDEX.EXE /D:" + m->cfg.cd_device + " /L:" + cd_letter(m) + "\r\n";
+    } else return "";
+    std::string dir = hostfs::join(m->cfg.root, "PC98PLAYER.SAV");
+    HostDirEntry st;
+    if (!hostfs::stat(dir, st)) hostfs::mkdir(dir);
+    std::string path = hostfs::join(dir, canon);
+    void* h = hostfs::open(path, 1, true, true);
+    if (!h) return "";
+    hostfs::write(h, t.data(), (int)t.size());
+    hostfs::close(h);
+    if (m->cfg.trace) plog("[dos] %s は無いので、設定どおりの中身を見せます（%s）\n", canon.c_str(), path.c_str());
+    return path;
 }
 static void dos_open(Machine* m, const std::string& name, int mode, bool create, bool trunc, bool excl) {
     if (m->cfg.trace) plog("[dos] open %s mode=%d%s\n", name.c_str(), mode, create ? " create" : "");
@@ -1335,7 +1368,7 @@ static void dos_open(Machine* m, const std::string& name, int mode, bool create,
     if (dn.empty() && (create || (mode & 3) != 0) && on_cd(m, name)) { dos_error(m, 5); return; }
     Sft& f = s_sft[sft];
     if (!dn.empty()) {
-        if (dn == "CON") f.kind = 2; else if (dn == "NUL") f.kind = 3; else f.kind = 4;
+        if (dn == "CON") f.kind = 2; else if (dn == "NUL") f.kind = 3; else { f.kind = 4; f.name = dn; }
     } else {
         bool exists;
         std::string canon;
@@ -1349,6 +1382,10 @@ static void dos_open(Machine* m, const std::string& name, int mode, bool create,
             std::vector<std::string> c; split_guest(name, c, nullptr);
             if (c.size() > 1) host_of(m, c, c.size() - 1, &pe);
             if (!pe) { f = Sft(); dos_error(m, 3); return; }
+        }
+        if (!create && !is_file && (mode & 3) == 0 && s_sg_drive == m->cfg.drive && (canon == "AUTOEXEC.BAT" || canon == "CONFIG.SYS")) {
+            std::string v = virtual_sysfile(m, canon);
+            if (!v.empty()) { host = v; is_file = true; }
         }
         if (!create && !is_file) { f = Sft(); dos_error(m, 2); return; }
         if (excl && is_file) { f = Sft(); dos_error(m, 0x50); return; }
@@ -1749,6 +1786,7 @@ static void int21(Machine* m) {
             Sft& f = s_sft[s];
             if (al == 0x00) {
                 uint16_t info = f.kind == 1 ? (uint16_t)(m->cfg.drive - 'A') : f.kind == 2 ? 0x80D3 : f.kind == 3 ? 0x8084 : 0x80C0;
+                if (f.kind == 4 && f.name == m->cfg.cd_device) info = 0xC0C0;   // CD-ROM の装置: IOCTL できる
                 SETDX(m, info); SETAX(m, info);
             } else if (al == 0x06) {
                 if (f.kind == 1) {
@@ -1760,6 +1798,18 @@ static void int21(Machine* m) {
             } else if (al == 0x07) SETAL(m, 0xFF);
             else if (al == 0x0A) SETDX(m, 0);
             dos_ok(m); return;
+        }
+        if (al == 0x02 || al == 0x03) {   // 装置の IOCTL（CD-ROM の装置だけ。MSCDEX の装置への要求と同じ制御ブロック）
+            int s = sft_of(m, BX(m));
+            if (s < 0) { dos_error(m, 6); return; }
+            Sft& f = s_sft[s];
+            if (!(f.kind == 4 && f.name == m->cfg.cd_device && cd_letter(m))) { dos_error(m, 1); return; }
+            uint32_t cb = lin(DS(m), DX(m));
+            uint16_t st = al == 0x02 ? cd_ioctl_input(m, cb) : cd_ioctl_output(m, cb);
+            if (m->cfg.trace) { static int k = 0; if (k++ < 64) { char hx[64] = ""; for (int i = 0; i < 11; i++) snprintf(hx + i * 3, 4, " %02X", mem_rb(m, cb + i));
+                plog("[cd] IOCTL %s コード %u → %04Xh（%s）\n", al == 2 ? "入力" : "出力", mem_rb(m, cb), st, hx); } }
+            if (st & 0x8000) { dos_error(m, 0x0D); return; }
+            SETAX(m, CX(m)); dos_ok(m); return;
         }
         if (al == 0x08) { SETAX(m, 1); dos_ok(m); return; }
         if (al == 0x09) {   // ドライブがリモートか: 無いドライブはエラー（使えるドライブの一覧を作るファイラーがある）
@@ -2735,40 +2785,121 @@ static void sft_sync_guest(Machine* m) {
 
 // ---- 振り分け ----------------------------------------------------------------
 // ---- CD-ROM（MSCDEX 2.10 相当） ---------------------------------------------
-//  INT 2Fh AX=15xxh。ドライブは 1 台（CDROM= で入れたイメージかフォルダ）。CD-DA（音楽トラック）は無い
-//  扱い（演奏の要求は「終わった」と答えるだけ）。
-bool dos_set_cdrom(Machine* m, const std::string& host, std::string* err) {
+//  INT 2Fh AX=15xxh と、装置名（CDDevice=、既定 MSCD001）を開いての IOCTL（INT 21h AX=4402h/4403h）。
+//  ドライブは 1 台（CDROM= で入れたイメージ・CUE シート・フォルダ）。CD-DA は cdda.cpp が鳴らす。
+static std::string s_cd_info;   // 何を入れたか（記録用）
+bool dos_set_cdrom(Machine* m, const std::string& host, const std::string& cdda_dir, std::string* err) {
     isofs::unmount(); isofs::set_readonly_folder(""); s_cd_folder.clear(); s_cdcwd.clear(); dir_invalidate();
+    cdda::reset();
+    s_cd_info.clear();
     if (host.empty()) return true;
     HostDirEntry st;
     if (!hostfs::stat(host, st)) { if (err) *err = "見つかりません"; return false; }
-    if (st.is_dir) { s_cd_folder = host; isofs::set_readonly_folder(host); }
-    else if (!isofs::mount(host, err)) return false;
-    if (m->cfg.trace) plog("[cd] CD-ROM %c: %s（%s）\n", m->cfg.cd_drive, host.c_str(),
-                           st.is_dir ? "フォルダ" : ("ISO " + isofs::volume_label()).c_str());
+    std::string up = host; for (auto& ch : up) ch = (char)toupper((unsigned char)ch);
+    bool cue = up.size() > 4 && up.compare(up.size() - 4, 4, ".CUE") == 0;
+    if (st.is_dir) {
+        s_cd_folder = host; isofs::set_readonly_folder(host);
+        // フォルダの CD: データトラックの大きさは中身の合計から見積もる
+        uint64_t total = 0;
+        std::vector<std::string> todo{host};
+        for (size_t k = 0; k < todo.size() && k < 4096; k++) {
+            std::vector<HostDirEntry> l; hostfs::list_dir(todo[k], l);
+            for (auto& e : l) { if (e.is_dir) todo.push_back(hostfs::join(todo[k], e.name)); else total += e.size; }
+        }
+        cdda::set_data_only((uint32_t)(total / 2048 + 300));
+        s_cd_info = "フォルダ";
+    } else if (cue) {
+        std::string data; uint32_t ss = 2048, so = 0; int64_t doff = 0;
+        if (!cdda::load_cue(host, err, &data, &ss, &so, &doff)) return false;
+        if (!data.empty() && !isofs::mount(data, err, ss, so, doff)) { cdda::reset(); return false; }
+        s_cd_info = "CUE " + std::to_string(cdda::last_track()) + " トラック";
+    } else {
+        if (!isofs::mount(host, err)) return false;
+        cdda::set_data_only(isofs::volume_sectors());
+        s_cd_info = "ISO " + isofs::volume_label();
+    }
+    if (!cdda_dir.empty()) {
+        std::string inf;
+        cdda::add_folder(cdda_dir, &inf);
+        s_cd_info += "、CD-DA のフォルダ " + inf;
+    }
+    if (m->cfg.trace) {
+        plog("[cd] CD-ROM %c:（装置名 %s）%s（%s）\n", m->cfg.cd_drive, m->cfg.cd_device.c_str(), host.c_str(), s_cd_info.c_str());
+        for (int t = cdda::first_track(); t <= cdda::last_track(); t++) {
+            const cdda::Track* k = cdda::track(t);
+            if (k) plog("[cd]   トラック %2d %s 先頭 %6u 長さ %6u %s\n", t, k->audio ? "音楽" : "データ", k->start, k->length, k->audio ? (k->src ? k->path.c_str() : "（音なし）") : "");
+        }
+    }
     return true;
 }
 static void cd_dev_header(Machine* m) {
     uint32_t H = lin(DOSSEG, D_CDDEV);
     ww(m, H + 0, 0xFFFF); ww(m, H + 2, 0xFFFF); ww(m, H + 4, 0xC800);     // 文字装置・IOCTL 対応
     ww(m, H + 6, D_BLKDEV + 0x12); ww(m, H + 8, D_BLKDEV + 0x12);           // 戦略・割込み（RETF）
-    const char* nm = "MSCD001 ";
+    std::string nm = m->cfg.cd_device; nm.resize(8, ' ');
     for (int i = 0; i < 8; i++) mem_wb(m, H + 0x0A + i, (uint8_t)nm[i]);
     ww(m, H + 0x12, 0); mem_wb(m, H + 0x14, (uint8_t)(cd_letter(m) - 'A' + 1)); mem_wb(m, H + 0x15, 1);
 }
 // CD のセクタを読む（フォルダの CD は生のセクタが無い）
 static bool cd_read_sector(uint32_t lba, uint8_t* out) { return isofs::mounted() && isofs::read_sector(lba, out); }
-static uint32_t cd_sectors() { return isofs::mounted() ? isofs::volume_sectors() : 300000; }
-static uint32_t redbook(uint32_t lba) {   // HSG（論理セクタ）→ Red Book（フレーム, 秒, 分）
-    lba += 150;
-    return (lba % 75) | (((lba / 75) % 60) << 8) | ((lba / 75 / 60) << 16);
+static uint32_t redbook(uint32_t hsg) {   // HSG（論理セクタ）→ Red Book（フレーム, 秒, 分）
+    hsg += 150;
+    return (hsg % 75) | (((hsg / 75) % 60) << 8) | ((hsg / 75 / 60) << 16);
+}
+static uint32_t from_redbook(uint32_t rb) { uint32_t v = (rb & 0xFF) + ((rb >> 8) & 0xFF) * 75 + ((rb >> 16) & 0xFF) * 4500; return v >= 150 ? v - 150 : 0; }
+static void w32(Machine* m, uint32_t a, uint32_t v) { ww(m, a, (uint16_t)v); ww(m, a + 2, (uint16_t)(v >> 16)); }
+static uint32_t r32(Machine* m, uint32_t a) { return rw(m, a) | ((uint32_t)rw(m, a + 2) << 16); }
+// IOCTL 入力（制御ブロック cb）。戻りは装置の状態語（完了 0100h / エラー 8103h など）
+static uint16_t cd_ioctl_input(Machine* m, uint32_t cb) {
+    uint8_t code = mem_rb(m, cb);
+    switch (code) {
+    case 0: ww(m, cb + 1, D_CDDEV); ww(m, cb + 3, DOSSEG); cd_dev_header(m); break;     // 装置ヘッダ
+    case 1: { uint8_t mode = mem_rb(m, cb + 1); uint32_t p = cdda::position(); w32(m, cb + 2, mode == 1 ? redbook(p) : p); break; }   // ヘッドの位置
+    case 4: { uint8_t v0, v1; cdda::get_volume(&v0, &v1);                                    // 音量
+              const uint8_t ch[8] = {0, v0, 1, v1, 2, 0, 3, 0}; for (int i = 0; i < 8; i++) mem_wb(m, cb + 1 + i, ch[i]); break; }
+    case 5: for (int i = 1; i <= 128; i++) mem_wb(m, cb + i, 0); break;                     // 装置の生データ
+    case 6: w32(m, cb + 1, 0x00000316u); break;                 // 状態: 扉は閉・生読み・音楽・HSG と Red Book
+    case 7: ww(m, cb + 2, mem_rb(m, cb + 1) ? 2352 : 2048); break;                          // セクタの大きさ
+    case 8: w32(m, cb + 1, cdda::leadout()); break;                                         // ボリュームの大きさ
+    case 9: mem_wb(m, cb + 1, 1); break;                                                     // 媒体は替わっていない
+    case 10: mem_wb(m, cb + 1, (uint8_t)cdda::first_track()); mem_wb(m, cb + 2, (uint8_t)cdda::last_track());
+             w32(m, cb + 3, redbook(cdda::leadout())); break;                                // 音楽の情報（トラックの範囲と終わり）
+    case 11: { int no = mem_rb(m, cb + 1); const cdda::Track* t = cdda::track(no);           // トラックの情報
+               if (!t) return 0x8108;
+               w32(m, cb + 2, redbook(t->start)); mem_wb(m, cb + 6, t->audio ? 0x01 : 0x41); break; }
+    case 12: {   // Q チャンネル（今のトラック・位置）
+        uint32_t p = cdda::position(); int no = cdda::track_at(p); const cdda::Track* t = cdda::track(no);
+        uint32_t rel = t && p >= t->start ? p - t->start : 0;
+        mem_wb(m, cb + 1, t && !t->audio ? 0x41 : 0x01); mem_wb(m, cb + 2, (uint8_t)no); mem_wb(m, cb + 3, 1);
+        mem_wb(m, cb + 4, (uint8_t)(rel / 4500)); mem_wb(m, cb + 5, (uint8_t)((rel / 75) % 60)); mem_wb(m, cb + 6, (uint8_t)(rel % 75));
+        mem_wb(m, cb + 7, 0);
+        uint32_t ab = p + 150;
+        mem_wb(m, cb + 8, (uint8_t)(ab / 4500)); mem_wb(m, cb + 9, (uint8_t)((ab / 75) % 60)); mem_wb(m, cb + 10, (uint8_t)(ab % 75));
+        break; }
+    case 15: {   // 演奏の状態（一時停止か、再開の範囲）
+        uint32_t st, en; cdda::last_range(&st, &en);
+        ww(m, cb + 1, cdda::paused() ? 1 : 0); w32(m, cb + 3, redbook(st)); w32(m, cb + 7, redbook(en));
+        break; }
+    default: return 0x8103;
+    }
+    return 0x0100;
+}
+// IOCTL 出力（扉・ロック・リセット・音量など）
+static uint16_t cd_ioctl_output(Machine* m, uint32_t cb) {
+    uint8_t code = mem_rb(m, cb);
+    if (code == 3) cdda::set_volume(mem_rb(m, cb + 2), mem_rb(m, cb + 4));   // 出力 0・1 の音量
+    else if (code == 2) cdda::stop(), cdda::stop();                          // リセット
+    return 0x0100;
 }
 static void mscdex(Machine* m) {
     uint8_t al = AL(m);
     char cd = cd_letter(m);
     bool drv_ok = cd && (CX(m) & 0xFF) == cd - 'A';
     auto bad_drive = [&]() { SETAX(m, 15); set_cf(m, true); };
-    if (m->cfg.trace) { static int k = 0; if (k < 64) { k++; plog("[cd] INT 2Fh AX=%04X BX=%04X CX=%04X DX=%04X\n", AX(m), BX(m), CX(m), DX(m)); } }
+    if (m->cfg.trace) { static int k = 0; if (k < 64 || (al == 0x10 && k < 400)) { k++;
+        uint8_t cmd = al == 0x10 ? mem_rb(m, lin(ES(m), BX(m)) + 2) : 0;
+        plog("[cd] INT 2Fh AX=%04X BX=%04X CX=%04X DX=%04X%s\n", AX(m), BX(m), CX(m), DX(m),
+             al == 0x10 ? (" 要求 " + std::to_string(cmd)).c_str() : ""); } }
     switch (al) {
     case 0x00:   // 組み込み確認: 台数と先頭のドライブ
         if (!cd) return;   // 無い（BX はそのまま 0）
@@ -2815,40 +2946,32 @@ static void mscdex(Machine* m) {
         uint8_t cmd = mem_rb(m, q + 2);
         uint16_t st = 0x0100;   // 完了
         if (!drv_ok) st = 0x8101;   // 不明なユニット
-        else if (cmd == 3 || cmd == 12) {   // IOCTL 入力・出力
-            uint32_t cb = lin(rw(m, q + 0x10), rw(m, q + 0x0E));
-            uint8_t code = mem_rb(m, cb);
-            if (cmd == 3) switch (code) {
-                case 0: ww(m, cb + 1, D_CDDEV); ww(m, cb + 3, DOSSEG); cd_dev_header(m); break;   // 装置ヘッダ
-                case 1: ww(m, cb + 2, 0); ww(m, cb + 4, 0); break;                                // ヘッドの位置
-                case 4: { static const uint8_t ch[8] = {0, 0xFF, 1, 0xFF, 2, 0, 3, 0}; for (int i = 0; i < 8; i++) mem_wb(m, cb + 1 + i, ch[i]); break; }
-                case 5: for (int i = 1; i <= 128; i++) mem_wb(m, cb + i, 0); break;               // 装置の生データ
-                case 6: ww(m, cb + 1, 0x0316); ww(m, cb + 3, 0); break;                            // 装置の状態（扉は閉・生読み・HSG/Red Book）
-                case 7: ww(m, cb + 2, 2048); break;                                                // セクタの大きさ
-                case 8: { uint32_t n = cd_sectors(); ww(m, cb + 1, (uint16_t)n); ww(m, cb + 3, (uint16_t)(n >> 16)); break; }
-                case 9: mem_wb(m, cb + 1, 1); break;                                               // 媒体は替わっていない
-                case 10: { uint32_t lo = redbook(cd_sectors()); mem_wb(m, cb + 1, 1); mem_wb(m, cb + 2, 1);
-                           ww(m, cb + 3, (uint16_t)lo); ww(m, cb + 5, (uint16_t)(lo >> 16)); break; }   // 音楽の情報: トラック 1 だけ
-                case 11: { uint32_t t = redbook(0); ww(m, cb + 2, (uint16_t)t); ww(m, cb + 4, (uint16_t)(t >> 16));
-                           mem_wb(m, cb + 6, 0x41); break; }                                       // トラック 1 はデータ
-                case 12: for (int i = 1; i <= 10; i++) mem_wb(m, cb + i, 0); break;               // Q チャンネル
-                case 15: for (int i = 1; i <= 10; i++) mem_wb(m, cb + i, 0); break;               // 演奏の状態（止まっている）
-                default: st = 0x8103; break;
-            }
-        } else if (cmd == 128) {   // 読み出し（long）
+        else if (cmd == 3) st = cd_ioctl_input(m, lin(rw(m, q + 0x10), rw(m, q + 0x0E)));
+        else if (cmd == 12) st = cd_ioctl_output(m, lin(rw(m, q + 0x10), rw(m, q + 0x0E)));
+        else if (cmd == 128) {   // 読み出し（long）
             uint8_t mode = mem_rb(m, q + 0x0D);
             uint32_t a = lin(rw(m, q + 0x10), rw(m, q + 0x0E));
             uint16_t n = rw(m, q + 0x12);
-            uint32_t start = rw(m, q + 0x14) | ((uint32_t)rw(m, q + 0x16) << 16);
-            if (mode == 1) start = (start & 0xFF) + ((start >> 8) & 0xFF) * 75 + ((start >> 16) & 0xFF) * 4500 - 150;
+            uint32_t start = r32(m, q + 0x14);
+            if (mode == 1) start = from_redbook(start);
             uint8_t sec[2048];
             for (uint32_t i = 0; i < n; i++) {
                 if (!cd_read_sector(start + i, sec)) { st = 0x8108; break; }   // セクタが見つからない
                 for (int k = 0; k < 2048; k++) mem_wb(m, a + i * 2048 + k, sec[k]);
             }
-        } else if (cmd == 13 || cmd == 14 || cmd == 130 || cmd == 131 || cmd == 132 || cmd == 133 || cmd == 136) {
-            // 開く・閉じる・先読み・シーク・演奏・停止・再開: CD-DA は無いので、すぐ「終わった」と答える
-        } else st = 0x8103;   // 不明なコマンド
+        } else if (cmd == 132) {   // 音楽の演奏: 先頭（HSG か Red Book）とセクタ数
+            uint8_t mode = mem_rb(m, q + 0x0D);
+            uint32_t start = r32(m, q + 0x0E), n = r32(m, q + 0x12);
+            if (mode == 1) start = from_redbook(start);
+            const cdda::Track* tk = cdda::track(cdda::track_at(start));
+            if (tk && !tk->audio) st = 0x810C;   // データトラックは演奏できない（実機と同じくエラー。ディスクの確認に使うゲームがある）
+            else cdda::play(start, n);
+            if (m->cfg.trace) { static int k = 0; if (k++ < 200) plog("[cd] 演奏 トラック %d（%s HSG %u から %u セクタ）%s\n", cdda::track_at(start), mode == 1 ? "Red Book" : "HSG", start, n, cdda::has_audio() ? "" : "（CD-DA の音が無いので無音）"); }
+        } else if (cmd == 133) cdda::stop();      // 停止（演奏中なら一時停止）
+        else if (cmd == 136) cdda::resume();      // 再開
+        else if (cmd == 13 || cmd == 14 || cmd == 130 || cmd == 131) {}   // 開く・閉じる・先読み・シーク
+        else st = 0x8103;   // 不明なコマンド
+        if (cdda::playing()) st |= 0x0200;   // 演奏中は「busy」
         ww(m, q + 3, st);
         set_cf(m, false); return; }
     default:
@@ -3101,6 +3224,7 @@ void dos_state_save(Machine* m, StateW& w) {
     for (auto& kv : s_subst) { w.pod(kv.first); w.str(kv.second); w.str(s_subst_cwd[kv.first]); }
     w.tag("CDR1");   // CD-ROM（開いているファイルを開き直す前に入れ直す）
     w.str(isofs::image_path()); w.str(s_cd_folder); w.str(s_cdcwd);
+    cdda::state_save(w);
     if (!s_keytab_init) keytab_default();
     w.tag("KEY1");
     for (int i = 0; i < 20; i++) for (int k = 0; k < 16; k++) w.pod(s_fkey[i][k]);
@@ -3176,6 +3300,7 @@ void dos_state_load(Machine* m, StateR& r) {
             if (!isofs::mount(img, &e)) plog("[state] CD-ROM を入れ直せません: %s (%s)\n", img.c_str(), e.c_str());
         } else if (img.empty() && isofs::mounted() && !fold.empty()) isofs::unmount();
         if (!fold.empty()) { s_cd_folder = fold; isofs::set_readonly_folder(fold); }
+        cdda::state_load(r);
     }
     keytab_default();
     if (r.peek_tag("KEY1")) {

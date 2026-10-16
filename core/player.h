@@ -24,7 +24,7 @@ struct PlayerSettings {
     std::string font_name;
     bool        font_shift = true;  // ホストのフォントから作る半角文字の左端の列を空ける（実機の ROM と同じに）
     int    sample_rate = 44100;
-    int    fm_volume = 100, ssg_volume = 100, beep_volume = 50, pcm_volume = 100;
+    int    fm_volume = 100, ssg_volume = 100, beep_volume = 50, pcm_volume = 100, cdda_volume = 100;
     bool   jis78 = true;       // 漢字 ROM を旧 JIS（1978）の並びにする
     std::string rhythm_rom;    // リズム音源の本物: 空・1=自動で探す / 0=内蔵の合成音 / ファイル名（ROM か 2608_*.WAV）
     int    midi_device = -1;   // MIDI=1 のときの出力先（-1 = MIDI マッパー）

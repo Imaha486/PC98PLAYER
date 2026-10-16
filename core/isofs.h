@@ -18,7 +18,8 @@
 struct HostDirEntry;
 namespace isofs {
     // イメージを差し込む（host_path はホストのパス）。前のものは外す
-    bool mount(const std::string& host_path, std::string* err);
+    // sec_size が 0 なら形（.ISO / .BIN）を自動で見分ける。CUE から入れるときは形とトラックの先頭の位置を渡す
+    bool mount(const std::string& host_path, std::string* err, uint32_t sec_size = 0, uint32_t sec_off = 0, int64_t base = 0);
     void unmount();
     bool mounted();
     const std::string& image_path();
