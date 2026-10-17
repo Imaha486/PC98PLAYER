@@ -328,6 +328,7 @@ Start=A:\AUTOEXEC.BAT</pre>
   <tr><td><code>CDROM=</code></td><td>なし</td><td>CD のイメージ（<code>.ISO</code>・<code>.CUE</code>・<code>.BIN</code>）か、CD の中身をコピーしたフォルダ。MSCDEX 付きの CD-ROM ドライブとして見せます（読み出しだけ。<code>.CUE</code> なら CD-DA の音楽も鳴ります。<a href="#cdrom">1-13</a>）。</td></tr>
   <tr><td><code>CDDrive=</code></td><td>Q</td><td>CD-ROM のドライブ名（C〜Z）。</td></tr>
   <tr><td><code>CDDA=</code></td><td>なし</td><td>CD-DA の音楽のファイル（WAV・MP3・FLAC。ファイル名の最後の 2 桁がトラック番号）を入れたフォルダ（<a href="#cdda">1-13</a>）。</td></tr>
+  <tr><td><code>CDType=</code></td><td>AUTO</td><td>CD の種類。<code>AUDIO</code> で音楽 CD（トラック 1 から音楽。データトラックなし）、<code>DATA</code> でトラック 1 をデータトラックにします（<a href="#cdaudio">1-13</a>）。</td></tr>
   <tr><td><code>CDDevice=</code></td><td>MSCD001</td><td>CD-ROM の装置名（MSCDEX の <code>/D:</code>）。</td></tr>
   <tr><td><code>CDDAVolume=</code></td><td>100</td><td>CD-DA の音量（%）。</td></tr>
 </table>
@@ -619,10 +620,20 @@ CDDA=BGM</pre>
 <ul>
   <li><strong>ファイル名の最後の 2 桁の数が、トラック番号です。</strong>前の部分は何でもかまいません。<br>
       例: <code>track_02.mp3</code> → トラック 2、<code>cdaudio_19.mp3</code> → トラック 19、<code>Game BGM-05.flac</code> → トラック 5</li>
-  <li>トラック 1 はデータトラックなので、02 から始まります。番号が飛んでいるときは、その番号に短い無音のトラックを置いて、番号がずれないようにします。</li>
+  <li>ゲームの CD では、トラック 1 はデータトラックなので、02 から始まります（01 のファイルは使いません）。音楽 CD のときは、下の「音楽 CD を入れる」を見てください。番号が飛んでいるときは、その番号に短い無音のトラックを置いて、番号がずれないようにします。</li>
   <li>WAV（8・16・24 ビット）・MP3・FLAC を読みます。周波数（44.1kHz 以外）やモノラルでもかまいません。</li>
   <li>CUE シートと一緒に書くと、同じ番号のトラックの音だけをフォルダのファイルに置き換えます（トラックの位置は CUE のまま）。</li>
   <li>CD-ROM 版のゲームには、音楽トラックの数や位置を確かめて「CD-ROM が違います」と止まるものがあります。フォルダで用意するときは、<strong>CD にあるすべての音楽トラックのファイル</strong>をそろえてください（最後の番号が CD と同じになっていることが大切です）。</li>
+</ul>
+<h4 id="cdaudio">音楽 CD（ゲームミュージックの CD など）を入れる</h4>
+<p>ゲームによっては、別売りのゲームミュージック CD などの<strong>音楽 CD</strong>をドライブに入れて、その曲を BGM にして遊べるものがあります。音楽 CD はトラック 1 から音楽で、データトラックがありません。音楽のファイル（01 から始まる番号）をフォルダに入れて、次のどれかで入れます。</p>
+<pre>CDDA=GMCD</pre>
+<ul>
+  <li><code>CDROM=</code> を書かずに <code>CDDA=</code> だけを書くと、音楽 CD になります。</li>
+  <li><code>CDROM=</code> に書いたフォルダの中が音楽のファイル（WAV・MP3・FLAC）だけなら、自動で音楽 CD とみなします（<code>CDROM=GMCD</code> と <code>CDDA=GMCD</code> を両方書いた形でもかまいません）。</li>
+  <li>それでも判断が違うときは、<code>CDType=AUDIO</code>（音楽 CD）か <code>CDType=DATA</code>（トラック 1 はデータ）を書いて決められます。<code>CDType=AUDIO</code> で <code>CDDA=</code> が無いときは、<code>CDROM=</code> のフォルダの曲を使います。</li>
+  <li>音楽 CD にはファイルがないので、DOS からは空のドライブに見えます。</li>
+  <li>CUE シートの音楽 CD（<code>TRACK 01 AUDIO</code> から始まるもの）は、<code>CDROM=XXX.CUE</code> でそのまま入れられます。</li>
 </ul>
 <h4>CD-DA の音量</h4>
 <p><code>CDDAVolume=</code>（既定 100%）か、<kbd>F11</kbd> →「S: 画面＆サウンド設定」の「CD-DA（CD の音楽）」で変えられます。ゲームが MSCDEX で指定する音量（左右）も効きます。</p>
@@ -634,6 +645,7 @@ CDDA=BGM</pre>
   <tr><td><code>CDROM=</code></td><td>なし</td><td>CD のイメージ（<code>.ISO</code>・<code>.CUE</code>・<code>.BIN</code>）か、CD の中身をコピーしたフォルダ。名前だけならゲームのフォルダ → PC98PLAYER.EXE のフォルダの順に探します。<code>CDROM=D:\CDIMAGE\GAME.ISO</code> のように場所ごと書いてもかまいません。</td></tr>
   <tr><td><code>CDDrive=</code></td><td>Q</td><td>CD-ROM のドライブ名（C〜Z）。MSCDEX の既定と同じ <code>Q:</code> にしておけば、たいていのゲームで問題ありません。ゲームのドライブやフロッピーのドライブと同じ文字にすると、CD-ROM は見えなくなります。</td></tr>
   <tr><td><code>CDDA=</code></td><td>なし</td><td>CD-DA の音楽のファイル（WAV・MP3・FLAC）を入れたフォルダ（上の「方法 2」）。</td></tr>
+  <tr><td><code>CDType=</code></td><td>AUTO</td><td>CD の種類。<code>AUTO</code>（CDDA= だけのときや、CDROM= のフォルダが音楽のファイルだけのときは音楽 CD、ほかはトラック 1 がデータの CD）・<code>DATA</code>（トラック 1 はデータトラック）・<code>AUDIO</code>（音楽 CD。トラック 1 から音楽。上の「音楽 CD を入れる」）。</td></tr>
   <tr><td><code>CDDevice=</code></td><td>MSCD001</td><td>CD-ROM の装置名（実機の AUTOEXEC.BAT の <code>MSCDEX /D:</code> の名前）。ゲームの起動オプションで装置名を指定するゲームは、この名前を書きます（例 <code>GAME /D:MSCD001</code>）。</td></tr>
   <tr><td><code>CDDAVolume=</code></td><td>100</td><td>CD-DA の音量（%）。</td></tr>
 </table>

@@ -170,6 +170,11 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
         ps->cfg.cdrom = G("CDROM", "");
         if (ps->cfg.cdrom.empty()) ps->cfg.cdrom = G("CDROMIMAGE", "");
         ps->cfg.cdda_dir = G("CDDA", "");
+        {   // CD の種類: AUTO（既定）/ DATA（トラック 1 はデータ）/ AUDIO（音楽 CD。トラック 1 から音楽）
+            std::string t = G("CDTYPE", "AUTO");
+            for (auto& c : t) c = (char)toupper((unsigned char)c);
+            ps->cfg.cd_type = (t == "AUDIO" || t == "MUSIC" || t == "2") ? 2 : (t == "DATA" || t == "1") ? 1 : 0;
+        }
         {   // 装置名（8 文字まで、大文字）
             std::string dv = G("CDDEVICE", "MSCD001");
             std::string u; for (char c : dv) if (c != ' ' && u.size() < 8) u.push_back((char)toupper((unsigned char)c));
@@ -384,7 +389,7 @@ bool Player::init(const PlayerSettings& s, std::string* err) {
         }
         std::string e;
         if (!dos_set_cdrom(m, cdp, cdd, &e)) {
-            cd_error = "CD-ROM のイメージを入れられません: " + ps.cfg.cdrom + "（" + e + "）";
+            cd_error = "CD-ROM のイメージを入れられません: " + (ps.cfg.cdrom.empty() ? ps.cfg.cdda_dir : ps.cfg.cdrom) + "（" + e + "）";
             plog("[cd] %s\n", cd_error.c_str());
         }
     }

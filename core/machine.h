@@ -148,6 +148,7 @@ struct Config {
     char     cd_drive = 'Q';         // CD-ROM のドライブ名（MSCDEX の既定と同じ Q:）
     std::string cd_device = "MSCD001"; // CD-ROM の装置名（MSCDEX の /D: と同じ。ゲームが開いて確かめる）
     std::string cdda_dir;            // CD-DA の音のフォルダ（ホストのパス。空なら無し）
+    int      cd_type = 0;            // CD の種類（CDType=）: 0 = 自動、1 = データの CD、2 = 音楽 CD（データトラックなし）
     char     current_drive = 0;      // 起動時のカレントドライブ（0 = Start= のドライブ、無ければゲームのドライブ）
     std::string current_dir;         // 起動時のカレントディレクトリ（例 A:\NANPA\。空 = 指定なし）
     int      free_mb = 96;           // ゲームのドライブの空き容量として見せる大きさ（MB）

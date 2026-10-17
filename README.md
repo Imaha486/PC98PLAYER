@@ -22,7 +22,7 @@ INI の `FloppyImage=` には、フロッピーイメージのほかにフォル
 
 ### CD-ROM 版のゲーム
 
-CD から作った ISO イメージ（.ISO）か生のデータトラック（.BIN）をゲームのフォルダに置き、INI に `CDROM=GAME.ISO` のように書くと、MSCDEX 付きの CD-ROM ドライブ（既定 `Q:`）として見せます。CD の中身をコピーしたフォルダの名前でもかまいません。CD-ROM のインストーラも `Start=Q:\INSTALL.EXE` で動かせます。CD-DA（音楽トラック）は、`CDROM=GAME.CUE` のように CUE シートで入れるか、音楽のファイル（WAV / MP3 / FLAC。ファイル名の最後の 2 桁がトラック番号）を入れたフォルダを `CDDA=` に書くと鳴ります。詳しくは取扱説明書の第一章 1-13。
+CD から作った ISO イメージ（.ISO）か生のデータトラック（.BIN）をゲームのフォルダに置き、INI に `CDROM=GAME.ISO` のように書くと、MSCDEX 付きの CD-ROM ドライブ（既定 `Q:`）として見せます。CD の中身をコピーしたフォルダの名前でもかまいません。CD-ROM のインストーラも `Start=Q:\INSTALL.EXE` で動かせます。CD-DA（音楽トラック）は、`CDROM=GAME.CUE` のように CUE シートで入れるか、音楽のファイル（WAV / MP3 / FLAC。ファイル名の最後の 2 桁がトラック番号）を入れたフォルダを `CDDA=` に書くと鳴ります。ゲームミュージック CD などの音楽 CD（トラック 1 から音楽）は、`CDDA=` だけを書くか `CDType=AUDIO` で入れられます。詳しくは取扱説明書の第一章 1-13。
 
 ### インストールアシスタント
 
@@ -108,6 +108,7 @@ GWRevs=3             ; Greaseweazle で 1 トラックを何回転読むか（1�
 FloppyDrive=B        ; フロッピーのドライブ名（A〜Z。Drive=B と FloppyDrive=A で入れ替えも可）。Start=B:\INSTALL.BAT のようにも書ける
 CDROM=               ; CD-ROM のイメージ（.ISO / .CUE / .BIN）かフォルダ。MSCDEX 付きの CD-ROM ドライブとして見せる（読み出しだけ。.CUE なら CD-DA も鳴る）
 CDDA=                ; CD-DA の音楽のファイル（WAV / MP3 / FLAC）を入れたフォルダ。ファイル名の最後の 2 桁がトラック番号（track_02.mp3 → トラック 2）
+CDType=AUTO          ; CD の種類。AUDIO = 音楽 CD（トラック 1 から音楽。ゲームミュージック CD などを入れて遊ぶゲーム向け）、DATA = トラック 1 はデータ。AUTO は CDDA= だけ、または CDROM= のフォルダが音のファイルだけなら音楽 CD
 CDDevice=MSCD001     ; CD-ROM の装置名（MSCDEX の /D:）。ゲームの起動オプションで装置名を指定するとき
 CDDAVolume=100       ; CD-DA の音量（%）
 CDDrive=Q            ; CD-ROM のドライブ名（MSCDEX の既定と同じ Q:）。Start=Q:\INSTALL.EXE のようにも書ける

@@ -215,9 +215,10 @@ static uint16_t hdd_total_clusters(Machine* m) { uint32_t t = (uint32_t)m->cfg.f
 static char cur_drive(Machine* m) { return s_curdrv ? s_curdrv : m->cfg.drive; }
 // CD-ROM のドライブ（CDROM= で入れたイメージかフォルダ）。無ければ 0
 static std::string s_cd_folder;   // フォルダを CD-ROM として入れたとき、そのホストのパス
+static bool s_cd_audio = false;   // 音楽 CD（データトラックもファイルも無い CD）を入れている
 static char cd_letter(Machine* m) {
     if (m->cfg.cd_drive == m->cfg.drive || floppy::unit_of_letter(m->cfg.cd_drive) >= 0) return 0;
-    return (isofs::mounted() || !s_cd_folder.empty()) ? m->cfg.cd_drive : 0;
+    return (isofs::mounted() || !s_cd_folder.empty() || s_cd_audio) ? m->cfg.cd_drive : 0;
 }
 static bool drive_valid(Machine* m, char d) { return d == m->cfg.drive || floppy::unit_of_letter(d) >= 0 || s_subst.count(d) || (d && d == cd_letter(m)); }
 static std::string s_cdcwd;    // CD-ROM のドライブのカレント
@@ -2792,9 +2793,30 @@ bool dos_set_cdrom(Machine* m, const std::string& host, const std::string& cdda_
     isofs::unmount(); isofs::set_readonly_folder(""); s_cd_folder.clear(); s_cdcwd.clear(); dir_invalidate();
     cdda::reset();
     s_cd_info.clear();
-    if (host.empty()) return true;
+    s_cd_audio = false;
+    if (host.empty() && cdda_dir.empty()) return true;
     HostDirEntry st;
-    if (!hostfs::stat(host, st)) { if (err) *err = "見つかりません"; return false; }
+    if (!host.empty() && !hostfs::stat(host, st)) { if (err) *err = "見つかりません"; return false; }
+    // 音楽 CD（トラック 1 から音楽。データトラックもファイルも無い）にするか
+    //  CDType=AUDIO、CDROM= を書かずに CDDA= だけ、CDROM= のフォルダの中が音のファイルだけ（CDType= が無いとき）
+    int type = m->cfg.cd_type;
+    if (host.empty()) type = 2;
+    else if (st.is_dir && type == 0) {
+        std::vector<HostDirEntry> l; hostfs::list_dir(host, l);
+        int na = 0, nother = 0;
+        for (auto& e : l) { if (e.is_dir) nother++; else if (cdda::is_audio_file(e.name)) na++; else nother++; }
+        if (na > 0 && nother == 0) type = 2;
+    }
+    if (type == 2 && (host.empty() || st.is_dir)) {
+        std::string music = cdda_dir.empty() ? host : cdda_dir;
+        HostDirEntry md;
+        if (!hostfs::stat(music, md) || !md.is_dir) { if (err) *err = "CD-DA のフォルダが見つかりません"; return false; }
+        std::string inf;
+        int n = cdda::add_folder(music, &inf);
+        if (n <= 0) { cdda::reset(); if (err) *err = "音のファイルがありません"; return false; }
+        s_cd_audio = true;
+        s_cd_info = "音楽 CD " + inf;
+    } else {
     std::string up = host; for (auto& ch : up) ch = (char)toupper((unsigned char)ch);
     bool cue = up.size() > 4 && up.compare(up.size() - 4, 4, ".CUE") == 0;
     if (st.is_dir) {
@@ -2812,6 +2834,7 @@ bool dos_set_cdrom(Machine* m, const std::string& host, const std::string& cdda_
         std::string data; uint32_t ss = 2048, so = 0; int64_t doff = 0;
         if (!cdda::load_cue(host, err, &data, &ss, &so, &doff)) return false;
         if (!data.empty() && !isofs::mount(data, err, ss, so, doff)) { cdda::reset(); return false; }
+        if (data.empty()) s_cd_audio = true;   // データトラックの無い CUE（音楽 CD）
         s_cd_info = "CUE " + std::to_string(cdda::last_track()) + " トラック";
     } else {
         if (!isofs::mount(host, err)) return false;
@@ -2822,6 +2845,9 @@ bool dos_set_cdrom(Machine* m, const std::string& host, const std::string& cdda_
         std::string inf;
         cdda::add_folder(cdda_dir, &inf);
         s_cd_info += "、CD-DA のフォルダ " + inf;
+        if (inf.find(" 1）") != std::string::npos || inf.find(": 1 ") != std::string::npos)
+            plog("[cd] トラック 1 はデータトラックなので、01 の曲は使いません（音楽 CD なら INI に CDType=AUDIO と書いてください）\n");
+    }
     }
     if (m->cfg.trace) {
         plog("[cd] CD-ROM %c:（装置名 %s）%s（%s）\n", m->cfg.cd_drive, m->cfg.cd_device.c_str(), host.c_str(), s_cd_info.c_str());

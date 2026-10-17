@@ -40,6 +40,8 @@ namespace cdda {
     void set_data_only(uint32_t sectors);
     // 音楽のフォルダ（CDDA=）を足す。読めた曲の数を返す
     int  add_folder(const std::string& dir, std::string* info);
+    // 名前が音のファイル（.WAV / .MP3 / .FLAC）か
+    bool is_audio_file(const std::string& name);
 
     bool has_audio();
     int  first_track();

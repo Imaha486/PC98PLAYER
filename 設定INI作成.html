@@ -166,6 +166,8 @@ const SCHEMA = [
     { key: "CDDrive", label: "CD-ROM のドライブ", type: "drive", def: "Q", help: "MSCDEX の既定と同じ Q: にしておけば、たいていのゲームで問題ありません。CD-ROM のインストーラは「最初に実行するプログラム」を Q:\\INSTALL.EXE のようにして動かせます。" },
     { key: "CDDA", label: "CD-DA の音楽のフォルダ", type: "text", def: "", placeholder: "例: BGM（空なら使わない）",
       help: "CD の音楽トラックを WAV・MP3・FLAC のファイルにして入れたフォルダ。ファイル名の最後の 2 桁がトラック番号です（track_02.mp3 → トラック 2、cdaudio_19.mp3 → トラック 19）。CUE シートが無いとき、または CUE の音を置き換えたいときに使います。" },
+    { key: "CDType", label: "CD の種類", type: "select", def: "AUTO", options: [["AUTO","自動"],["DATA","ゲームの CD（トラック 1 はデータ）"],["AUDIO","音楽 CD（トラック 1 から音楽）"]],
+      help: "ゲームミュージック CD などの音楽 CD を入れて遊ぶゲームでは「音楽 CD」にして、CD-DA の音楽のフォルダに 01 からの曲を入れます。自動のときは、CD-DA のフォルダだけ書いたときや、CD-ROM のフォルダの中が音のファイルだけのときに音楽 CD とみなします。" },
     { key: "CDDevice", label: "CD-ROM の装置名", type: "text", def: "MSCD001", placeholder: "MSCD001",
       help: "実機の AUTOEXEC.BAT の「MSCDEX /D:」の名前。ゲームの起動オプションで装置名を指定するゲーム（例 GAME /D:MSCD001）は、ここと同じ名前にします。ふつうは変えません。" },
     { key: "CDDAVolume", label: "CD-DA の音量", type: "number", def: "100", min: 0, max: 1000, unit: "%" },
