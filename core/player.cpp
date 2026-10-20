@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <algorithm>
+#include <map>
 #include <time.h>
 #include "state.h"
 
@@ -462,9 +463,49 @@ void Player::midi_feed(uint8_t b) {
 
 static const float k_opna_makeup = 4.0f;   // +12dB
 
+// 調べもの（Trace=1）: MS-DOS を 10 秒呼ばずに動き続けたら、止まっている場所の見当を記録に書く
+uint32_t g_int21_count = 0;
+unsigned* g_stall_int = nullptr;    // 調べている間だけ: ソフトウェア割込みの回数
+unsigned* g_stall_port = nullptr;   // 調べている間だけ: ポートの読み出しの回数
+static void stall_check(Machine* m) {
+    static uint32_t last = 0xFFFFFFFF; static int quiet = 0, sampling = 0, reports = 0;
+    static std::map<uint32_t, unsigned> ips;
+    if (sampling > 0) {
+        ips[((uint32_t)m->cpu.sr[CS_] << 16) | (m->cpu.ip & 0xFFFF)]++;
+        if (--sampling == 0) {
+            plog("[stall] MS-DOS を 10 秒呼んでいません（止まっているかもしれません）。この 2 秒のようす:\n");
+            std::vector<std::pair<unsigned, uint32_t>> v; for (auto& kv : ips) v.push_back({kv.second, kv.first});
+            std::sort(v.rbegin(), v.rend());
+            std::string s; for (size_t i = 0; i < v.size() && i < 8; i++) { char b[40]; snprintf(b, sizeof b, " %04X:%04X(%u)", v[i].second >> 16, v[i].second & 0xFFFF, v[i].first); s += b; }
+            plog("[stall]   CPU の場所:%s\n", s.c_str());
+            std::vector<std::pair<unsigned, int>> pv; for (int i = 0; i < 65536; i++) if (g_stall_port[i]) pv.push_back({g_stall_port[i], i});
+            std::sort(pv.rbegin(), pv.rend());
+            s.clear(); for (size_t i = 0; i < pv.size() && i < 10; i++) { char b[32]; snprintf(b, sizeof b, " %04X(%u)", pv[i].second, pv[i].first); s += b; }
+            plog("[stall]   読んだポート:%s\n", s.empty() ? " なし" : s.c_str());
+            s.clear(); for (int i = 0; i < 256; i++) if (g_stall_int[i]) { char b[24]; snprintf(b, sizeof b, " INT %02Xh(%u)", i, g_stall_int[i]); s += b; }
+            plog("[stall]   呼んだ割込み:%s\n", s.empty() ? " なし" : s.c_str());
+            uint32_t a = ((uint32_t)m->cpu.sr[CS_] << 4) + (m->cpu.ip & 0xFFFF);
+            s.clear(); for (int i = 0; i < 24; i++) { char b[4]; snprintf(b, sizeof b, " %02X", m->ram[(a + i) & 0xFFFFF]); s += b; }
+            { extern uint16_t g_ifoff_cs, g_ifoff_ip; extern int g_ifoff_kind;
+              if (!(m->cpu.fl & FL_IF)) plog("[stall]   割込みが禁止されたまま（最後に禁止した命令: %04X:%04X の %s）\n", g_ifoff_cs, g_ifoff_ip, g_ifoff_kind == 1 ? "CLI" : g_ifoff_kind == 2 ? "POPF" : g_ifoff_kind >= 0x100 ? (g_ifoff_kind == 0x1CF ? "IRET" : "そのほかの命令") : "?"); }
+            plog("[stall]   %04X:%04X のコード:%s  AX=%04X BX=%04X CX=%04X DX=%04X DS=%04X ES=%04X\n", m->cpu.sr[CS_], m->cpu.ip & 0xFFFF, s.c_str(),
+                 m->cpu.r[EAX] & 0xFFFF, m->cpu.r[EBX] & 0xFFFF, m->cpu.r[ECX] & 0xFFFF, m->cpu.r[EDX] & 0xFFFF, m->cpu.sr[DS_], m->cpu.sr[ES_]);
+            delete[] g_stall_int; delete[] g_stall_port; g_stall_int = nullptr; g_stall_port = nullptr; ips.clear();
+            reports++;
+        }
+        return;
+    }
+    if (g_int21_count != last) { last = g_int21_count; quiet = 0; return; }
+    if (++quiet == 560 && reports < 8) {   // 約 10 秒
+        sampling = 112;   // 約 2 秒ぶん調べる
+        g_stall_int = new unsigned[256](); g_stall_port = new unsigned[65536]();
+    }
+}
+
 void Player::run_frame(bool render_video, bool render_audio) {
     uint64_t t0 = m->ticks;
     machine_run_frame(m);
+    if (m->cfg.trace && !m->quit) { extern bool g_if_track; g_if_track = true; stall_check(m); }
     floppy::idle();
     uint64_t t1 = m->ticks;
     if (!m->midi_out.empty()) { for (uint8_t b : m->midi_out) midi_feed(b); m->midi_out.clear(); }

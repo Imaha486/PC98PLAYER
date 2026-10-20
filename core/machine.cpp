@@ -641,6 +641,7 @@ static bool unknown_io_log(Machine* m, uint16_t port);
 uint8_t io_in8(Machine* m, uint16_t port) {
     g_side_fx++;
     uint8_t v = io_in8_(m, port);
+    { extern unsigned* g_stall_port; if (g_stall_port) g_stall_port[port]++; }
     if (port >= g_trace_port_lo && port <= g_trace_port_hi && s_port_log++ < 3000) plog("[in ] %04X -> %02X @%04X:%04X\n", port, v, m->cpu.op_cs, m->cpu.op_ip);
     return v;
 }

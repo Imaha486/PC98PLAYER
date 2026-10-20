@@ -166,6 +166,7 @@ ExitOnEnd=0</pre></li>
   <tr><td><code>[dos] 起動 …</code></td><td>起動したプログラム名と、残りのメモリ量。</td></tr>
   <tr><td><code>[dos] 常駐終了 …</code></td><td>サウンドドライバなどがメモリに常駐した記録。</td></tr>
   <tr><td><code>[dos] open …</code></td><td>ゲームが開こうとしたファイル。</td></tr>
+  <tr><td><code>[stall] …</code></td><td>ゲームが 10 秒以上 MS-DOS を呼ばずに動き続けたときの、CPU の場所・読んだポート・呼んだ割込み。画面が止まったときの<strong>重要な手掛かり</strong>です（入力を待っているだけのときにも出ます）。</td></tr>
   <tr><td><code>[dos] AH=xx -&gt; error nn</code></td><td>DOS の機能がエラーを返した記録。正常な動作でも出ることがあります。</td></tr>
   <tr><td><code>[dos] INT 21h AH=xxh 未対応</code></td><td>PC98PLAYER がまだ対応していない DOS の機能をゲームが使った記録。<strong>重要な手掛かり</strong>です。</td></tr>
   <tr><td><code>[fd] …</code></td><td>フロッピーの読み書き（INT 1Bh）と結果、本物のドライブの状態。</td></tr>

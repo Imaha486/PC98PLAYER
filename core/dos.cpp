@@ -2558,6 +2558,14 @@ static bool run_command(Machine* m, const std::string& cmdline) {
     std::string prog = sp == std::string::npos ? line : line.substr(0, sp);
     std::string found;
     if (dos_resolve_exec(m, prog, &found) != 0) {
+        {   // 空の行・EOF（1Ah）だけの行は何もしない
+            bool blank = true; for (unsigned char c : prog) if (c > 0x20 && c != 0x1A) blank = false;
+            if (blank) return false;
+        }
+        {   // MSCDEX は組み込み（CDROM= のとき）なので、AUTOEXEC.BAT やゲームのバッチにあっても飛ばす
+            std::string b = upper_dbcs(prog); size_t sl = b.find_last_of("\\:"); if (sl != std::string::npos) b = b.substr(sl + 1);
+            if (b == "MSCDEX" || b == "MSCDEX.EXE" || b == "NECCDD" || b == "NECCDD.SYS") { plog("[shell] %s は組み込みなので飛ばします\n", prog.c_str()); return false; }
+        }
         shell_print(m, "Bad command or file name");
         plog("[shell] 見つかりません: %s\n", prog.c_str());
         return false;
@@ -2838,7 +2846,8 @@ bool dos_set_cdrom(Machine* m, const std::string& host, const std::string& cdda_
         s_cd_info = "CUE " + std::to_string(cdda::last_track()) + " トラック";
     } else {
         if (!isofs::mount(host, err)) return false;
-        cdda::set_data_only(isofs::volume_sectors());
+        // データトラックの長さ: イメージのファイルの大きさ（CUE から切り出した ISO なら元の CD と同じ）。ボリュームの大きさより短ければそちら
+        cdda::set_data_only(std::max(isofs::volume_sectors(), isofs::image_sectors()));
         s_cd_info = "ISO " + isofs::volume_label();
     }
     if (!cdda_dir.empty()) {
@@ -2884,7 +2893,7 @@ static uint16_t cd_ioctl_input(Machine* m, uint32_t cb) {
     case 4: { uint8_t v0, v1; cdda::get_volume(&v0, &v1);                                    // 音量
               const uint8_t ch[8] = {0, v0, 1, v1, 2, 0, 3, 0}; for (int i = 0; i < 8; i++) mem_wb(m, cb + 1 + i, ch[i]); break; }
     case 5: for (int i = 1; i <= 128; i++) mem_wb(m, cb + i, 0); break;                     // 装置の生データ
-    case 6: w32(m, cb + 1, 0x00000316u); break;                 // 状態: 扉は閉・生読み・音楽・HSG と Red Book
+    case 6: w32(m, cb + 1, 0x00000316u | (cdda::playing() ? 0x400u : 0)); break;   // 状態: 扉は閉・生読み・音楽・HSG と Red Book（bit 10 = 演奏中）
     case 7: ww(m, cb + 2, mem_rb(m, cb + 1) ? 2352 : 2048); break;                          // セクタの大きさ
     case 8: w32(m, cb + 1, cdda::leadout()); break;                                         // ボリュームの大きさ
     case 9: mem_wb(m, cb + 1, 1); break;                                                     // 媒体は替わっていない
@@ -2922,10 +2931,27 @@ static void mscdex(Machine* m) {
     char cd = cd_letter(m);
     bool drv_ok = cd && (CX(m) & 0xFF) == cd - 'A';
     auto bad_drive = [&]() { SETAX(m, 15); set_cf(m, true); };
-    if (m->cfg.trace) { static int k = 0; if (k < 64 || (al == 0x10 && k < 400)) { k++;
-        uint8_t cmd = al == 0x10 ? mem_rb(m, lin(ES(m), BX(m)) + 2) : 0;
-        plog("[cd] INT 2Fh AX=%04X BX=%04X CX=%04X DX=%04X%s\n", AX(m), BX(m), CX(m), DX(m),
-             al == 0x10 ? (" 要求 " + std::to_string(cmd)).c_str() : ""); } }
+    if (m->cfg.trace) {
+        // 同じ問い合わせを繰り返すゲームが多いので、続けて同じものは回数だけ（1・2・4・8… 回目）を書く
+        static int k = 0; static uint32_t last = 0xFFFFFFFF; static uint32_t rep = 0;
+        uint8_t cmd = 0, code = 0;
+        if (al == 0x10) {
+            uint32_t q = lin(ES(m), BX(m)); cmd = mem_rb(m, q + 2);
+            if (cmd == 3 || cmd == 12) code = mem_rb(m, lin(rw(m, q + 0x10), rw(m, q + 0x0E)));
+        }
+        uint32_t key = ((uint32_t)al << 16) | ((uint32_t)cmd << 8) | code;
+        if (key == last) {
+            rep++;
+            if ((rep & (rep - 1)) == 0 && rep >= 4 && k < 4000) { k++; plog("[cd]   （同じ要求が %u 回続いています）\n", rep); }
+        } else {
+            last = key; rep = 1;
+            if (k < 4000) { k++;
+                std::string what;
+                if (al == 0x10) { what = " 要求 " + std::to_string(cmd); if (cmd == 3) what += "（IOCTL 入力 コード " + std::to_string(code) + "）"; else if (cmd == 12) what += "（IOCTL 出力 コード " + std::to_string(code) + "）"; }
+                plog("[cd] INT 2Fh AX=%04X BX=%04X CX=%04X DX=%04X%s\n", AX(m), BX(m), CX(m), DX(m), what.c_str());
+            }
+        }
+    }
     switch (al) {
     case 0x00:   // 組み込み確認: 台数と先頭のドライブ
         if (!cd) return;   // 無い（BX はそのまま 0）
@@ -3009,7 +3035,7 @@ static void mscdex(Machine* m) {
 void dos_hle(Machine* m, uint8_t n) {
     m->ram[lin(DOSSEG, D_INDOS)] = 1;
     switch (n) {
-    case HLE_INT21: int21(m); sft_sync_guest(m); break;
+    case HLE_INT21: { extern uint32_t g_int21_count; g_int21_count++; } int21(m); sft_sync_guest(m); break;
     case HLE_INT20: terminate(m, 0, 0, 0); break;
     case HLE_INT27: terminate(m, 0, 3, (uint16_t)((DX(m) + 15) >> 4)); break;
     case HLE_INT28: break;

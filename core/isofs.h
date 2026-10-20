@@ -25,6 +25,7 @@ namespace isofs {
     const std::string& image_path();
     std::string volume_label();          // 主ボリューム記述子のボリューム名（後ろの空白は除く）
     uint32_t volume_sectors();           // ボリュームの大きさ（2048 バイトのセクタ数）
+    uint32_t image_sectors();            // イメージのファイルに入っているセクタの数（トラックの長さ）
     // 2048 バイトのセクタを読む（MSCDEX の絶対読み出し・VTOC の読み出し用）。範囲外は false
     bool read_sector(uint32_t lba, uint8_t* out);
 

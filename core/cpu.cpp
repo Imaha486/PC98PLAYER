@@ -15,6 +15,7 @@
 #include "memio.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <vector>
 #include <string>
@@ -22,6 +23,7 @@ void plog(const char* fmt, ...);
 
 int g_irq_hint = 0;
 int g_trace_int = -1;
+uint16_t g_ifoff_cs = 0, g_ifoff_ip = 0; int g_ifoff_kind = 0; bool g_if_track = false;   // 調べもの: 最後に割込みを禁止した命令（1 = CLI, 2 = POPF）
 unsigned long long g_frame_dbg;
 int g_prof_cs = -1; unsigned* g_prof = nullptr;      // Machine が「受け付け待ちの IRQ があるかも」を立てる
 
@@ -999,7 +1001,7 @@ static void step() {
         far_call(seg, off); d_cyc += 10; return; }
     case 0x9B: return;
     case 0x9C: if (d_o32) push32(C->fl & 0x00FCFFFFu); else push16((uint16_t)C->fl); return;
-    case 0x9D: { uint32_t v = popv(); set_flags_word(v, d_o32); return; }
+    case 0x9D: { uint32_t v = popv(); bool was = C->fl & FL_IF; set_flags_word(v, d_o32); if (was && !(C->fl & FL_IF)) { g_ifoff_cs = C->op_cs; g_ifoff_ip = C->op_ip; g_ifoff_kind = 2; } return; }
     case 0x9E: C->fl = (C->fl & ~0xD5u) | ((C->r[EAX] >> 8) & 0xD5); return;
     case 0x9F: setr(8, 4, (C->fl & 0xD5) | 0x02); return;
     case 0xA0: case 0xA1: case 0xA2: case 0xA3: {
@@ -1049,6 +1051,7 @@ static void step() {
     case 0xCB: far_ret(0); d_cyc += 12; return;
     case 0xCC: do_int(3); return;
     case 0xCD: { uint8_t v = f8();
+        { extern unsigned* g_stall_int; if (g_stall_int) g_stall_int[v]++; }
         if (v == g_trace_int) { s_tr_cs = C->sr[CS_]; s_tr_ip = C->ip; s_tr_on = 1; }
         if (v == g_trace_int) fprintf(stderr, "[f%llu int %02X] AX=%04X BX=%04X CX=%04X DX=%04X DS=%04X ES=%04X from %04X:%04X\n", (unsigned long long)g_frame_dbg, v, C->r[EAX] & 0xFFFF, C->r[EBX] & 0xFFFF, C->r[ECX] & 0xFFFF, C->r[EDX] & 0xFFFF, C->sr[DS_], C->sr[ES_], C->op_cs, C->op_ip);
         do_int(v); return; }
@@ -1099,7 +1102,7 @@ static void step() {
     case 0xF7: modrm(); grp3(vsz); return;
     case 0xF8: C->fl &= ~FL_CF; return;
     case 0xF9: C->fl |= FL_CF; return;
-    case 0xFA: C->fl &= ~FL_IF; return;
+    case 0xFA: if (C->fl & FL_IF) { g_ifoff_cs = C->op_cs; g_ifoff_ip = C->op_ip; g_ifoff_kind = 1; } C->fl &= ~FL_IF; return;
     case 0xFB: if (!(C->fl & FL_IF)) C->inhibit_irq = 1; C->fl |= FL_IF; return;
     case 0xFC: C->fl &= ~FL_DF; return;
     case 0xFD: C->fl |= FL_DF; return;
@@ -1401,18 +1404,40 @@ static void step_dw() {
     if (--s_dw.left <= 0) s_dw.active = false;
 }
 
+// 次の命令が SS を書き換える（MOV SS / POP SS）か。
+// 「MOV SP → MOV SS」の順にスタックを戻すプログラムがある（実機でも、その 1 命令の間に割込みが入ると
+// 別のスタックの続きに積まれて壊れる）。実機では滅多に当たらないが、エミュレータでは割込みの入る位置が
+// 偏って何度も当たることがあるので、SS を書き換える命令の直前では割込みを 1 命令だけ待たせる
+// （MOV SS の後ろは実機と同じく 1 命令禁止なので、SS:SP がそろってから受け付ける）
+static bool next_loads_ss() {
+    uint32_t a = sbase(CS_) + C->ip;
+    for (int i = 0; i < 4; i++) {
+        uint8_t op = mem_rb(M, a + i);
+        if (op == 0x26 || op == 0x2E || op == 0x36 || op == 0x3E || op == 0x64 || op == 0x65 || op == 0x66 || op == 0x67) continue;
+        if (op == 0x17) return true;
+        if (op == 0x8E) return ((mem_rb(M, a + i + 1) >> 3) & 7) == SS_;
+        return false;
+    }
+    return false;
+}
+
 int cpu_run(Cpu* c, int budget) {
     C = c; M = c->m;
     int used = 0;
     while (used < budget) {
-        if (g_irq_hint && (C->fl & FL_IF) && !C->inhibit_irq) {
+        if (g_irq_hint && (C->fl & FL_IF) && !C->inhibit_irq && (C->halted || !next_loads_ss())) {
             int v = pic_acknowledge(M);
             if (v >= 0) { C->halted = 0; d_cyc = 0; do_int((uint8_t)v); used += d_cyc; spin_clear(); }
         }
         C->inhibit_irq = 0;
         if (C->halted) { used = budget; break; }
         uint16_t cs0 = C->sr[CS_]; uint32_t ip0 = C->ip;
-        if (DW_UNLIKELY(s_dw.active)) step_dw(); else step();
+        if (DW_UNLIKELY(g_if_track)) {
+            bool pre = C->fl & FL_IF;
+            if (DW_UNLIKELY(s_dw.active)) step_dw(); else step();
+            if (pre && !(C->fl & FL_IF)) { uint8_t op = mem_rb(M, ((uint32_t)C->op_cs * 16 + C->op_ip) & 0xFFFFF);
+                if (op != 0xFA && op != 0x9D && op != 0xCD) { g_ifoff_cs = C->op_cs; g_ifoff_ip = C->op_ip; g_ifoff_kind = 0x100 | op; } }
+        } else if (DW_UNLIKELY(s_dw.active)) step_dw(); else step();
         used += d_cyc;
         // 短い後ろ向きの分岐（ループの戻り）
         if (C->sr[CS_] == cs0 && C->ip < ip0 && ip0 - C->ip <= 64 && g_idle_skip) {

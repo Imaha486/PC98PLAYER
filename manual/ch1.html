@@ -621,6 +621,7 @@ CDDA=BGM</pre>
   <li><strong>ファイル名の最後の 2 桁の数が、トラック番号です。</strong>前の部分は何でもかまいません。<br>
       例: <code>track_02.mp3</code> → トラック 2、<code>cdaudio_19.mp3</code> → トラック 19、<code>Game BGM-05.flac</code> → トラック 5</li>
   <li>ゲームの CD では、トラック 1 はデータトラックなので、02 から始まります（01 のファイルは使いません）。音楽 CD のときは、下の「音楽 CD を入れる」を見てください。番号が飛んでいるときは、その番号に短い無音のトラックを置いて、番号がずれないようにします。</li>
+  <li>CUE + BIN（IMG）の CD イメージからは、ソース（<code>_src.zip</code>）の <code>tools\cue2folder.py</code> で、データトラックの ISO（<code>TRACK01.ISO</code>）と音楽トラックのファイル（<code>BGM\track02.mp3</code> …）に分けられます（Python が要ります。MP3 にするには <code>--mp3</code> を付け、ffmpeg も要ります）。<code>python cue2folder.py GAME.CUE 出力 --mp3</code> のように使い、INI には <code>CDROM=TRACK01.ISO</code> と <code>CDDA=BGM</code> を書きます。CD イメージより、ずっと小さくなります。</li>
   <li>WAV（8・16・24 ビット）・MP3・FLAC を読みます。周波数（44.1kHz 以外）やモノラルでもかまいません。</li>
   <li>CUE シートと一緒に書くと、同じ番号のトラックの音だけをフォルダのファイルに置き換えます（トラックの位置は CUE のまま）。</li>
   <li>CD-ROM 版のゲームには、音楽トラックの数や位置を確かめて「CD-ROM が違います」と止まるものがあります。フォルダで用意するときは、<strong>CD にあるすべての音楽トラックのファイル</strong>をそろえてください（最後の番号が CD と同じになっていることが大切です）。</li>

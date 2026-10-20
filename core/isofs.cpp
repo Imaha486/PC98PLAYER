@@ -101,6 +101,7 @@ bool mounted() { return s_img != nullptr; }
 const std::string& image_path() { return s_path; }
 std::string volume_label() { return s_label; }
 uint32_t volume_sectors() { return s_volsecs; }
+uint32_t image_sectors() { return s_img && s_secsize ? (uint32_t)((s_imgsize - s_base) / s_secsize) : 0; }
 
 bool mount(const std::string& host_path, std::string* err, uint32_t sec_size, uint32_t sec_off, int64_t base) {
     unmount();
