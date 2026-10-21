@@ -216,7 +216,7 @@ const SCHEMA = [
     { key: "JoyButton4", label: "ボタン 4", type: "text", def: "RETURN" },
   ]},
   { title: "調べもの", note: "ふだんは使いません", items: [
-    { key: "Trace", label: "記録", type: "check", def: "0", on: "1", off: "0", text: "PC98PLAYER.LOG を書き出す", help: "動かないときの調査用（第四章 4-10）。" },
+    { key: "Trace", label: "記録", type: "select", def: "0", options: [["0","書かない"],["1","PC98PLAYER.LOG を書く"],["2","PC98PLAYER.LOG と、終わる直前の詳しい記録（PC98PLAYER.DEBUG・PC98PLAYER.MEM）を書く"]], help: "動かないときの調査用（第四章 4-10）。2 は止まる・落ちるときの調査用で、動きが少し重くなります。" },
     { key: "MemoryEditor", label: "メモリエディタ", type: "check", def: "0", on: "1", off: "0", text: "起動と同時にメモリエディタを開く" },
     { key: "CodeEditor", label: "コードエディタ", type: "check", def: "0", on: "1", off: "0", text: "起動と同時にコードエディタを開く" },
   ]},

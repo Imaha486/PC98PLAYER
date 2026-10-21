@@ -74,6 +74,7 @@
     <ClCompile Include="core\fatfs.cpp" />
     <ClCompile Include="core\isofs.cpp" />
     <ClCompile Include="core\cdda.cpp" />
+    <ClCompile Include="core\debugdump.cpp" />
     <ClCompile Include="core\gdcdraw.cpp" />
     <ClCompile Include="win32\main.cpp" />
   </ItemGroup>

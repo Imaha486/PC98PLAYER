@@ -242,5 +242,6 @@ int main(int argc, char** argv) {
         memcpy(h + 36, "data", 4); w32(40, n);
         fwrite(h, 1, 44, o); fwrite(pcm.data(), 2, pcm.size(), o); fclose(o);
     }
+    p->shutdown();   // Trace=2 なら PC98PLAYER.DEBUG を書く
     return 0;
 }

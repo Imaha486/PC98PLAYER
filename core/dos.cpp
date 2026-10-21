@@ -12,6 +12,7 @@
 #include "hostfs.h"
 #include "floppy.h"
 #include "isofs.h"
+#include "debugdump.h"
 #include "cdda.h"
 #include <string.h>
 #include <ctype.h>
@@ -354,6 +355,23 @@ static void mcb_set(Machine* m, uint16_t s, uint8_t t, uint16_t owner, uint16_t 
 }
 static void mcb_name(Machine* m, uint16_t s, const std::string& n) {
     for (int i = 0; i < 8; i++) m->ram[lin(s, 8 + i)] = (uint8_t)(i < (int)n.size() ? n[i] : 0);
+}
+// Trace=2 の PC98PLAYER.DEBUG 用: MCB の鎖（場所・種類・持ち主・大きさ・名前）
+std::string dos_debug_mcb(Machine* m) {
+    std::string r; char b[160];
+    uint16_t s = first_mcb(m);
+    for (int guard = 0; guard < 512; guard++) {
+        uint8_t t = mcb_type(m, s);
+        if (t != 'M' && t != 'Z') { snprintf(b, sizeof b, "%04X: 壊れている（種類 %02X）\n", s, t); r += b; break; }
+        char nm[9] = {}; for (int i = 0; i < 8; i++) { uint8_t c = m->ram[lin(s, 8 + i)]; nm[i] = (c >= 0x20 && c < 0x7F) ? (char)c : (c ? '.' : 0); }
+        uint16_t own = mcb_owner(m, s), sz = mcb_size(m, s);
+        snprintf(b, sizeof b, "%04X: %c 中身 %04X～%04X（%5u 段落 = %6u バイト） 持ち主 %04X%s %s\n", s, t, s + 1, (unsigned)(s + sz), sz, sz * 16u, own,
+                 own == 0 ? "（空き）" : own == 8 ? "（DOS）" : own == (uint16_t)(s + 1) ? "（自分の PSP）" : "", nm);
+        r += b;
+        if (t == 'Z') break;
+        s = (uint16_t)(s + 1 + sz);
+    }
+    return r;
 }
 static void mcb_merge(Machine* m) {
     uint16_t s = first_mcb(m);
@@ -3035,7 +3053,7 @@ static void mscdex(Machine* m) {
 void dos_hle(Machine* m, uint8_t n) {
     m->ram[lin(DOSSEG, D_INDOS)] = 1;
     switch (n) {
-    case HLE_INT21: { extern uint32_t g_int21_count; g_int21_count++; } int21(m); sft_sync_guest(m); break;
+    case HLE_INT21: { extern uint32_t g_int21_count; g_int21_count++; } int21(m); sft_sync_guest(m); if (g_dbg_on) dbg_note_int21_ret(m); break;
     case HLE_INT20: terminate(m, 0, 0, 0); break;
     case HLE_INT27: terminate(m, 0, 3, (uint16_t)((DX(m) + 15) >> 4)); break;
     case HLE_INT28: break;

@@ -2,6 +2,7 @@
 // -----------------------------------------------------------------------------
 //  machine.cpp  --  仮想 PC-9801 のデバイスと時間軸
 // -----------------------------------------------------------------------------
+#include "debugdump.h"
 #include "machine.h"
 #include "floppy.h"
 #include <string.h>
@@ -641,6 +642,7 @@ static bool unknown_io_log(Machine* m, uint16_t port);
 uint8_t io_in8(Machine* m, uint16_t port) {
     g_side_fx++;
     uint8_t v = io_in8_(m, port);
+    if (g_dbg_on) dbg_note_io(m, port, v, false, false);
     { extern unsigned* g_stall_port; if (g_stall_port) g_stall_port[port]++; }
     if (port >= g_trace_port_lo && port <= g_trace_port_hi && s_port_log++ < 3000) plog("[in ] %04X -> %02X @%04X:%04X\n", port, v, m->cpu.op_cs, m->cpu.op_ip);
     return v;
@@ -713,6 +715,7 @@ static bool unknown_io_log(Machine* m, uint16_t port) {
 }
 void io_out8(Machine* m, uint16_t port, uint8_t v) {
     g_side_fx++;
+    if (g_dbg_on) dbg_note_io(m, port, v, true, false);
     if (port >= g_trace_port_lo && port <= g_trace_port_hi && s_port_log++ < 3000) plog("[out] %04X <- %02X @%04X:%04X\n", port, v, m->cpu.op_cs, m->cpu.op_ip);
     switch (port) {
     case 0x00: pic_write(m, 0, 0, v); return;
@@ -814,6 +817,7 @@ void io_out16(Machine* m, uint16_t port, uint16_t v) {
     g_side_fx++;
     if (port >= 0x4A0 && port <= 0x4AF) {
         if (port >= g_trace_port_lo && port <= g_trace_port_hi && s_port_log++ < 3000) plog("[out] %04X <- %04X (w) @%04X:%04X\n", port, v, m->cpu.op_cs, m->cpu.op_ip);
+        if (g_dbg_on) dbg_note_io(m, port, v, true, true);
         egc_out16(m, port, v); return; }
     io_out8(m, port, (uint8_t)v);
     io_out8(m, (uint16_t)(port + 1), (uint8_t)(v >> 8));

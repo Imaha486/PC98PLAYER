@@ -5,6 +5,7 @@
 #include "opna_renderer.h"
 #include "rhythm_rom.h"
 #include "cdda.h"
+#include "debugdump.h"
 #include "hostfs.h"
 #include <string.h>
 #include <stdlib.h>
@@ -407,6 +408,8 @@ bool Player::init(const PlayerSettings& s, std::string* err) {
         }
     }
     floppy::clear_swap_flags();
+    g_dbg_on = ps.cfg.trace >= 2;   // Trace=2: 終わる直前のようすを PC98PLAYER.DEBUG に書く
+    dbg_begin(m);
     if (ps.cfg.boot_fd) {
         // ブートモード: 1 台目の IPL から起動する
         std::string why;
@@ -474,6 +477,7 @@ static void stall_check(Machine* m) {
         ips[((uint32_t)m->cpu.sr[CS_] << 16) | (m->cpu.ip & 0xFFFF)]++;
         if (--sampling == 0) {
             plog("[stall] MS-DOS を 10 秒呼んでいません（止まっているかもしれません）。この 2 秒のようす:\n");
+            { char b[96]; snprintf(b, sizeof b, "[stall] フレーム %llu: MS-DOS を 10 秒呼んでいない（CS:IP=%04X:%04X）", (unsigned long long)m->frame_count, m->cpu.sr[CS_], (unsigned)(m->cpu.ip & 0xFFFF)); dbg_note_text(b); }
             std::vector<std::pair<unsigned, uint32_t>> v; for (auto& kv : ips) v.push_back({kv.second, kv.first});
             std::sort(v.rbegin(), v.rend());
             std::string s; for (size_t i = 0; i < v.size() && i < 8; i++) { char b[40]; snprintf(b, sizeof b, " %04X:%04X(%u)", v[i].second >> 16, v[i].second & 0xFFFF, v[i].first); s += b; }
@@ -506,6 +510,7 @@ void Player::run_frame(bool render_video, bool render_audio) {
     uint64_t t0 = m->ticks;
     machine_run_frame(m);
     if (m->cfg.trace && !m->quit) { extern bool g_if_track; g_if_track = true; stall_check(m); }
+    if (g_dbg_on) dbg_frame(m);
     floppy::idle();
     uint64_t t1 = m->ticks;
     if (!m->midi_out.empty()) { for (uint8_t b : m->midi_out) midi_feed(b); m->midi_out.clear(); }
@@ -653,6 +658,12 @@ void Player::run_frame(bool render_video, bool render_audio) {
 }
 
 void Player::shutdown() {
+    if (m && g_dbg_on) {
+        std::string e;
+        if (dbg_write(m, ps.cfg.root, &e)) plog("[debug] PC98PLAYER.DEBUG と PC98PLAYER.MEM を書きました\n");
+        else plog("[debug] %s\n", e.c_str());
+        g_dbg_on = false;
+    }
     delete opna; opna = nullptr;
     machine_destroy(m); m = nullptr;
 }

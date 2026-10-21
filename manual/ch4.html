@@ -159,6 +159,18 @@ ExitOnEnd=0</pre></li>
   <li>終了すると、ゲームのフォルダに <code>PC98PLAYER.LOG</code> ができています（テキストファイル、UTF-8）。</li>
   <li>調べ終わったら <code>Trace=0</code> に戻してください（記録中は少し重くなり、ログも大きくなります）。</li>
 </ol>
+<h3 id="trace2">止まる・落ちるときの詳しい記録（Trace=2）</h3>
+<p>画面が止まる、未定義命令で落ちるといった不具合は、<code>Trace=1</code> のログだけでは原因が分からないことがあります。そのときは <code>Trace=2</code> にしてください。</p>
+<ol class="steps">
+  <li><code>PC98PLAYER.INI</code> に <code>Trace=2</code> と <code>ExitOnEnd=0</code> を書きます。</li>
+  <li>不具合が起きるところまで進め、止まったらそのまま 15 秒ほど待ってから、ウインドウを閉じて終了します。</li>
+  <li>ゲームのフォルダに、<code>PC98PLAYER.LOG</code> のほかに次の 2 つができます。3 つそろえて送ってください。
+    <ul>
+      <li><code>PC98PLAYER.DEBUG</code>（テキスト）… 終わったときの CPU のレジスタ・スタック・割込みベクタ・メモリの使われ方、終わる前 10 秒の 1 秒ごとの様子、直近の割込み・I/O ポート・命令の記録。</li>
+      <li><code>PC98PLAYER.MEM</code>（1MB）… 終わったときのメモリの中身そのまま。</li>
+    </ul></li>
+  <li><code>Trace=2</code> の間は、命令を 1 つずつ記録するので動きが少し重くなります。調べ終わったら <code>Trace=0</code> に戻してください。</li>
+</ol>
 <h3>ログに書かれる主な内容</h3>
 <div class="tablewrap">
 <table>

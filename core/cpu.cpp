@@ -13,6 +13,8 @@
 // -----------------------------------------------------------------------------
 #include "cpu.h"
 #include "memio.h"
+#include "debugdump.h"
+void dbg_note_insn(Machine* m);
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1052,6 +1054,7 @@ static void step() {
     case 0xCC: do_int(3); return;
     case 0xCD: { uint8_t v = f8();
         { extern unsigned* g_stall_int; if (g_stall_int) g_stall_int[v]++; }
+        if (g_dbg_on) dbg_note_int(M, v, false);
         if (v == g_trace_int) { s_tr_cs = C->sr[CS_]; s_tr_ip = C->ip; s_tr_on = 1; }
         if (v == g_trace_int) fprintf(stderr, "[f%llu int %02X] AX=%04X BX=%04X CX=%04X DX=%04X DS=%04X ES=%04X from %04X:%04X\n", (unsigned long long)g_frame_dbg, v, C->r[EAX] & 0xFFFF, C->r[EBX] & 0xFFFF, C->r[ECX] & 0xFFFF, C->r[EDX] & 0xFFFF, C->sr[DS_], C->sr[ES_], C->op_cs, C->op_ip);
         do_int(v); return; }
@@ -1427,11 +1430,13 @@ int cpu_run(Cpu* c, int budget) {
     while (used < budget) {
         if (g_irq_hint && (C->fl & FL_IF) && !C->inhibit_irq && (C->halted || !next_loads_ss())) {
             int v = pic_acknowledge(M);
+            if (v >= 0 && DW_UNLIKELY(g_dbg_on)) dbg_note_int(M, (uint8_t)v, true);
             if (v >= 0) { C->halted = 0; d_cyc = 0; do_int((uint8_t)v); used += d_cyc; spin_clear(); }
         }
         C->inhibit_irq = 0;
         if (C->halted) { used = budget; break; }
         uint16_t cs0 = C->sr[CS_]; uint32_t ip0 = C->ip;
+        if (DW_UNLIKELY(g_dbg_on)) dbg_note_insn(M);
         if (DW_UNLIKELY(g_if_track)) {
             bool pre = C->fl & FL_IF;
             if (DW_UNLIKELY(s_dw.active)) step_dw(); else step();
