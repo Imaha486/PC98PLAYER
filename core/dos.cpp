@@ -48,10 +48,28 @@ static const uint16_t D_CDDEV     = 0x00D0;   // CD-ROM の装置ヘッダ（MSC
 static const uint16_t D_DPB       = 0x0740;   // ゲームのドライブの DPB（21h バイト、DOS 4+ 形式）
 static const uint16_t D_BLKDEV    = 0x0770;   // その DPB が指すブロック装置のヘッダ（実体は無い）
 static const uint16_t D_DPB_FD    = 0x07C0;   // フロッピーのドライブの DPB（ユニットごとに 30h バイト）
+static const uint16_t D_DEVREQ    = 0x0880;   // CONFIG.SYS の DEVICE= のドライバを組み込むときの要求ヘッダ（20h バイト）
+static const uint16_t D_DEVCMD    = 0x08A0;   // そのドライバに渡す行（DEVICE= の後ろ。90h バイト）
 
 static inline uint32_t lin(uint16_t s, uint16_t o) { return ((uint32_t)s << 4) + o; }
 static inline uint16_t rw(Machine* m, uint32_t a) { return mem_rw(m, a); }
 static inline void ww(Machine* m, uint32_t a, uint16_t v) { mem_ww(m, a, v); }
+// 装置の鎖（NUL から）に、この名前の文字装置があるか（CONFIG.SYS の DEVICE= で組み込んだもの）
+static bool dev_chain_has(Machine* m, const std::string& name) {
+    if (name.empty() || name.size() > 8) return false;
+    char want[8]; for (int i = 0; i < 8; i++) want[i] = i < (int)name.size() ? name[i] : ' ';
+    uint32_t a = lin(DOSSEG, D_LOL) + 0x22;   // NUL
+    for (int guard = 0; guard < 64; guard++) {
+        uint16_t off = rw(m, a), seg = rw(m, a + 2);
+        if (off == 0xFFFF) return false;
+        a = lin(seg, off);
+        if (!(rw(m, a + 4) & 0x8000)) continue;   // ブロック装置
+        bool eq = true;
+        for (int i = 0; i < 8; i++) { uint8_t c = m->ram[(a + 0x0A + i) & 0xFFFFF]; if (c >= 'a' && c <= 'z') c = (uint8_t)(c - 32); if (c != (uint8_t)want[i]) { eq = false; break; } }
+        if (eq && seg != 0xF7F0) return true;   // EMMXXXX0 は別に扱う
+    }
+    return false;
+}
 
 #define R(m) (m)->cpu.r
 static inline uint16_t AX(Machine* m) { return (uint16_t)R(m)[EAX]; }
@@ -297,6 +315,7 @@ static bool split_guest(const std::string& in, std::vector<std::string>& comps, 
             if (b == "CON" || b == "NUL" || b == "AUX" || b == "PRN" || b == "CLOCK$" || b == "LPT1" || b == "COM1" || (b == "EMMXXXX0" && ems_enabled(g_m)))
                 *is_dev = true;
             if (cd_letter(g_m) && b == g_m->cfg.cd_device) *is_dev = true;   // CD-ROM の装置（MSCDEX の /D: の名前）
+            if (!*is_dev && dev_chain_has(g_m, b)) *is_dev = true;          // CONFIG.SYS で組み込んだ文字装置
         }
     }
     return true;
@@ -2727,6 +2746,202 @@ static void nested_shell_end(Machine* m) {
     terminate(m, (uint8_t)s_retcode_last, 0, 0);
 }
 
+// ---- CONFIG.SYS の DEVICE= のドライバ ------------------------------------------
+//  起動ドライブに本物の CONFIG.SYS があれば、DEVICE= / DEVICEHIGH= のドライバを、最初のプログラムより先に
+//  読み込んで初期化（INIT）し、文字装置なら装置の鎖（NUL の次）につなぐ。音源のドライバ（MIDI の MIDE.DRV、
+//  音楽の NMUSE.DRV など）を CONFIG.SYS で組み込むゲーム向け。
+//  ・メモリの管理（HIMEM・EMM386 など）・CD-ROM・日本語入力・マウスなど、PC98PLAYER が自分で持っているものや、
+//    組み込むと困るものは読まない（下の表）
+//  ・DEVICEHIGH= も普通のメモリに読む
+//  ・INIT のあと装置の鎖からたどれる（INT 21h AH=52h）。名前で開くこともできるが、読み書き・IOCTL は
+//    ドライバへは渡さない（開けるだけ）
+struct DevLoad { std::string guest, host, line; };
+static std::vector<DevLoad> s_devq;
+static size_t s_devi = 0;
+static int s_devphase = 0;
+static uint16_t s_devseg = 0, s_devstub = 0;
+
+static bool devload_skip(const std::string& base) {
+    static const char* const skip[] = {
+        "HIMEM", "EMM386", "VEM486", "VEMEMM", "QEMM", "QEMM386", "386MAX", "MELWARE", "EMM", "VMM386", "UMB", "UMBPCI",
+        "NECCDD", "NECCD", "CDROM", "MSCDEX", "CDD", "IDECD", "ATAPICD", "ATAPI", "SCSICD",
+        "SMARTDRV", "SETVER", "DBLSPACE", "DRVSPACE", "POWER", "DISPLAY", "ANSI", "PRINTER", "RAMDISK", "RAMDRIVE", "RAMDRV",
+        "MOUSE", "MOUSEDRV", "NECAIK", "NECAI", "AIKBD", "ATOK", "ATOK7", "ATOK8", "VJE", "VJEB", "VJEPC", "WX2", "WX3", "WXP", "MATSU", "KKC",
+        "RSDRV", "PRINT", "FONT", "IOSYS", "EMSDRV", "XMSDRV",
+    };
+    std::string b = base; size_t dot = b.find('.'); if (dot != std::string::npos) b = b.substr(0, dot);
+    for (const char* k : skip) if (b == k) return true;
+    return false;
+}
+
+// CONFIG.SYS を読んで、組み込むドライバの表を作る
+static void devload_scan(Machine* m) {
+    s_devq.clear(); s_devi = 0;
+    if (!m->cfg.load_devices) return;
+    std::string root = drive_root(m, m->cfg.drive);
+    std::vector<HostDirEntry> l;
+    if (!hostfs::list_dir(root, l)) return;
+    std::string cfgp;
+    for (auto& e : l) if (!e.is_dir && upper_dbcs(hostfs::to_sjis(e.name)) == "CONFIG.SYS") cfgp = hostfs::join(root, e.name);
+    std::vector<uint8_t> data;
+    if (cfgp.empty() || !read_host_file(cfgp, data)) return;
+    std::string text(data.begin(), data.end());
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t e = text.find_first_of("\r\n\x1A", pos);
+        std::string line = text.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
+        pos = e == std::string::npos ? text.size() : e + 1;
+        line = trim(line);
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = upper_dbcs(trim(line.substr(0, eq)));
+        if (key != "DEVICE" && key != "DEVICEHIGH") continue;
+        std::string val = trim(line.substr(eq + 1));
+        // DEVICEHIGH の /L:… や SIZE=… は飛ばす
+        while (!val.empty() && (val[0] == '/' || upper_dbcs(val.substr(0, 5)) == "SIZE=")) {
+            size_t sp = val.find_first_of(" \t"); if (sp == std::string::npos) { val.clear(); break; }
+            val = trim(val.substr(sp));
+        }
+        if (val.empty()) continue;
+        size_t sp = val.find_first_of(" \t");
+        std::string path = val.substr(0, sp);
+        std::string up = upper_dbcs(path);
+        size_t bs = up.find_last_of("\\:/");
+        std::string base = bs == std::string::npos ? up : up.substr(bs + 1);
+        if (devload_skip(base)) { if (m->cfg.trace) plog("[dev] %s は組み込みません（PC98PLAYER が持っているか、使えないもの）\n", path.c_str()); continue; }
+        std::string g = path;
+        if (!(g.size() >= 2 && g[1] == ':')) g = std::string(1, m->cfg.drive) + ":" + (g[0] == '\\' ? "" : "\\") + g;
+        char dv = (char)toupper((unsigned char)g[0]);
+        if (!drive_valid(m, dv)) { plog("[dev] %s: ドライブがありません\n", path.c_str()); continue; }
+        bool exists = false, dev = false;
+        std::string host = guest_to_host(m, g, &exists, &dev, nullptr);
+        if (!exists || dev) { plog("[dev] %s が見つかりません\n", g.c_str()); continue; }
+        DevLoad d; d.guest = g; d.host = host; d.line = val;
+        s_devq.push_back(d);
+    }
+}
+
+// ドライバの入口を far call する（戻り先は ROM の HLE_DEVINIT）
+static void devload_call(Machine* m, uint16_t seg, uint16_t off) {
+    Cpu* c = &m->cpu;
+    uint16_t sp = (uint16_t)c->r[ESP];
+    sp = (uint16_t)(sp - 2); ww(m, lin(c->sr[SS_], sp), ROMSEG);
+    sp = (uint16_t)(sp - 2); ww(m, lin(c->sr[SS_], sp), s_devstub);
+    c->r[ESP] = (c->r[ESP] & 0xFFFF0000u) | sp;
+    cpu_setsr(c, ES_, DOSSEG); c->r[EBX] = (c->r[EBX] & 0xFFFF0000u) | D_DEVREQ;
+    // 実機の MS-DOS と同じく DS:SI = 装置ヘッダで呼ぶ（戦略ルーチンで DS を前提に要求の場所をしまうドライバがある）
+    cpu_setsr(c, DS_, seg); c->r[ESI] = c->r[ESI] & 0xFFFF0000u;
+    cpu_setsr(c, CS_, seg); c->ip = off;
+    c->halted = 0;
+}
+
+// 次のドライバを読み込んで INIT を始める。無ければシェルへ
+static void devload_next(Machine* m) {
+    while (s_devi < s_devq.size()) {
+        const DevLoad& d = s_devq[s_devi];
+        std::vector<uint8_t> data;
+        if (!read_host_file(d.host, data) || data.size() < 0x12) { plog("[dev] %s を読めません\n", d.guest.c_str()); s_devi++; continue; }
+        bool mz = data[0] == 'M' && data[1] == 'Z' && data.size() >= 0x1C;
+        uint32_t hdr = 0, img = (uint32_t)data.size();
+        if (mz) {
+            uint16_t cblp = (uint16_t)(data[2] | (data[3] << 8)), cp = (uint16_t)(data[4] | (data[5] << 8));
+            hdr = (uint32_t)(data[8] | (data[9] << 8)) * 16;
+            img = (uint32_t)cp * 512 - (cblp ? (512 - cblp) : 0) - hdr;
+            if (hdr + img > data.size()) img = (uint32_t)data.size() - hdr;
+        }
+        uint16_t attr = (uint16_t)(data[hdr + 4] | (data[hdr + 5] << 8));
+        if (!(attr & 0x8000)) { plog("[dev] %s はブロック装置なので組み込みません\n", d.guest.c_str()); s_devi++; continue; }
+        uint16_t seg = 0, largest = 0;
+        mem_alloc(m, 0xFFFF, 8, &seg, &largest);
+        if (largest < (img + 15) / 16 + 0x10 || mem_alloc(m, largest, 8, &seg, nullptr)) { plog("[dev] %s: メモリが足りません\n", d.guest.c_str()); s_devi++; continue; }
+        for (uint32_t i = 0; i < img; i++) m->ram[(lin(seg, 0) + i) & 0xFFFFF] = data[hdr + i];
+        if (mz) {
+            uint16_t crlc = (uint16_t)(data[6] | (data[7] << 8)), lfarlc = (uint16_t)(data[24] | (data[25] << 8));
+            for (uint32_t i = 0; i < crlc && lfarlc + i * 4 + 3 < data.size(); i++) {
+                uint32_t r = lfarlc + i * 4;
+                uint16_t off = (uint16_t)(data[r] | (data[r + 1] << 8)), sg = (uint16_t)(data[r + 2] | (data[r + 3] << 8));
+                uint32_t a = lin((uint16_t)(sg + seg), off);
+                ww(m, a, (uint16_t)(rw(m, a) + seg));
+            }
+        }
+        {   // MCB の名前（MEM /C で見えるように。DOS 5 では "SD" だが、分かりやすくドライバの名前にする）
+            std::string up = upper_dbcs(d.guest); size_t bs = up.find_last_of('\\');
+            std::string nm = up.substr(bs + 1); nm = nm.substr(0, nm.find('.'));
+            mcb_name(m, (uint16_t)(seg - 1), nm);
+        }
+        // 要求ヘッダ（INIT）: +0Eh = 使ってよいメモリの終わり（戻りはドライバの終わり）、+12h = DEVICE= の後ろの行
+        uint32_t q = lin(DOSSEG, D_DEVREQ);
+        for (int i = 0; i < 0x20; i++) m->ram[q + i] = 0;
+        m->ram[q + 0] = 0x17; m->ram[q + 2] = 0;
+        ww(m, q + 0x0E, 0); ww(m, q + 0x10, (uint16_t)(seg + largest));
+        uint32_t cl = lin(DOSSEG, D_DEVCMD);
+        std::string ln = d.line; if (ln.size() > 0x8C) ln.resize(0x8C);
+        for (size_t i = 0; i < ln.size(); i++) m->ram[cl + i] = (uint8_t)ln[i];
+        m->ram[cl + ln.size()] = 0x0D; m->ram[cl + ln.size() + 1] = 0x0A; m->ram[cl + ln.size() + 2] = 0;
+        ww(m, q + 0x12, D_DEVCMD); ww(m, q + 0x14, DOSSEG);
+        m->ram[q + 0x16] = 0;
+        s_devseg = seg;
+        uint16_t strat = rw(m, lin(seg, 6));
+        if (m->cfg.trace) plog("[dev] %s を %04X:0000 に読み込みました（属性 %04X、名前 %.8s）INIT します\n", d.guest.c_str(), seg, attr, (const char*)&m->ram[lin(seg, 0x0A)]);
+        s_devphase = 1;
+        devload_call(m, seg, strat);
+        return;
+    }
+    s_devq.clear(); s_devi = 0; s_devphase = 0;
+    shell_resume(m);
+}
+
+static void devload_finish(Machine* m) {
+    const DevLoad& d = s_devq[s_devi];
+    uint32_t q = lin(DOSSEG, D_DEVREQ);
+    uint16_t st = rw(m, q + 3);
+    uint16_t eo = rw(m, q + 0x0E), es = rw(m, q + 0x10);
+    uint32_t start = lin(s_devseg, 0), end = ((uint32_t)es << 4) + eo;
+    uint16_t paras = end > start ? (uint16_t)((end - start + 15) / 16) : 0;
+    if ((st & 0x8000) || paras == 0) {
+        plog("[dev] %s の初期化に失敗しました（状態 %04X）\n", d.guest.c_str(), st);
+        mem_free(m, s_devseg);
+        return;
+    }
+    mem_resize(m, s_devseg, paras, nullptr);
+    // 装置の鎖につなぐ（NUL の次）。同じファイルに装置がいくつもあれば、次へのポインタで続く
+    uint32_t nul = lin(DOSSEG, D_LOL) + 0x22;
+    uint16_t off = 0;
+    std::vector<uint16_t> offs;
+    for (int guard = 0; guard < 8; guard++) {
+        offs.push_back(off);
+        uint16_t nx = rw(m, lin(s_devseg, off));
+        if (nx == 0xFFFF || (uint32_t)nx >= (uint32_t)paras * 16 || std::find(offs.begin(), offs.end(), nx) != offs.end()) break;
+        if (!(rw(m, lin(s_devseg, nx) + 4) & 0x8000)) break;
+        off = nx;
+    }
+    uint16_t old_off = rw(m, nul), old_seg = rw(m, nul + 2);
+    for (size_t i = 0; i < offs.size(); i++) {
+        uint32_t h = lin(s_devseg, offs[i]);
+        if (i + 1 < offs.size()) { ww(m, h, offs[i + 1]); ww(m, h + 2, s_devseg); }
+        else { ww(m, h, old_off); ww(m, h + 2, old_seg); }
+    }
+    ww(m, nul, 0); ww(m, nul + 2, s_devseg);
+    plog("[dev] %s を組み込みました（%04X:0000、%u バイト）\n", d.guest.c_str(), s_devseg, (unsigned)paras * 16);
+}
+
+static void devload_step(Machine* m) {
+    if (s_devphase == 1) {   // 戦略ルーチンから戻った: 割込みルーチンを呼ぶ
+        s_devphase = 2;
+        devload_call(m, s_devseg, rw(m, lin(s_devseg, 8)));
+        return;
+    }
+    if (s_devphase == 2) { devload_finish(m); s_devi++; }
+    s_devphase = 0;
+    shell_resume(m);   // SS:SP などをシェルのものに戻す
+    devload_next(m);
+}
+
+static void devload_begin(Machine* m) {
+    devload_scan(m);
+    if (!s_devq.empty()) devload_next(m);
+}
+
 void shell_start(Machine* m, const std::string& cmdline) {
     // Start=B:\INSTALL.BAT のようにドライブ付きなら、そのドライブをカレントにして始める
     // CurrentDrive= があればそれを優先（例: フロッピーの B:\INST.EXE を、ハードディスク A: をカレントにして動かす）
@@ -2785,6 +3000,7 @@ void shell_start(Machine* m, const std::string& cmdline) {
     s_batch.push_back(b);
     s_shell_running = true;
     shell_resume(m);
+    devload_begin(m);   // CONFIG.SYS の DEVICE= のドライバがあれば、先に組み込む（終わったらシェルへ）
 }
 
 // ゲストから見える SFT（LoL+4 から辿れる表）を中身に合わせる。
@@ -2815,6 +3031,24 @@ static void sft_sync_guest(Machine* m) {
 //  INT 2Fh AX=15xxh と、装置名（CDDevice=、既定 MSCD001）を開いての IOCTL（INT 21h AX=4402h/4403h）。
 //  ドライブは 1 台（CDROM= で入れたイメージ・CUE シート・フォルダ）。CD-DA は cdda.cpp が鳴らす。
 static std::string s_cd_info;   // 何を入れたか（記録用）
+// CD-ROM の装置ヘッダの場所（MSCDEX が返す）。ふだんは DOS のデータ領域、フロッピーから起動したときは ROM の空き
+static uint16_t s_cdh_seg = DOSSEG, s_cdh_off = D_CDDEV, s_cdh_retf = D_BLKDEV + 0x12;
+// フロッピーから起動したとき（本物の MS-DOS が動く）: MS-DOS のメモリを壊さないように、装置ヘッダを ROM へ移し、
+// INT 2Fh AH=15h（MSCDEX）を PC98PLAYER の MSCDEX へ回す（CD-ROM のドライバと MSCDEX.EXE はハードウェアが無いので組み込めない）
+static void cd_dev_header(Machine* m);
+uint16_t bios_rom_alloc(Machine* m, int n);
+void dos_cd_boot_mode(Machine* m) {
+    extern uint32_t g_int2f15_redirect;
+    g_int2f15_redirect = 0;
+    s_cdh_seg = DOSSEG; s_cdh_off = D_CDDEV; s_cdh_retf = D_BLKDEV + 0x12;
+    if (!cd_letter(m)) return;
+    uint16_t o = bios_rom_alloc(m, 0x19);
+    s_cdh_seg = ROMSEG; s_cdh_off = o; s_cdh_retf = (uint16_t)(o + 0x18);
+    m->ram[lin(ROMSEG, s_cdh_retf)] = 0xCB;
+    cd_dev_header(m);
+    g_int2f15_redirect = ((uint32_t)ROMSEG << 16) | bios_hle_stub(m, HLE_INT2F);   // PC98PLAYER の MSCDEX の入口
+    plog("[cd] フロッピーから起動: MSCDEX（INT 2Fh AH=15h）は PC98PLAYER が答えます（CD-ROM %c:、装置名 %s）\n", m->cfg.cd_drive, m->cfg.cd_device.c_str());
+}
 bool dos_set_cdrom(Machine* m, const std::string& host, const std::string& cdda_dir, std::string* err) {
     isofs::unmount(); isofs::set_readonly_folder(""); s_cd_folder.clear(); s_cdcwd.clear(); dir_invalidate();
     cdda::reset();
@@ -2886,9 +3120,9 @@ bool dos_set_cdrom(Machine* m, const std::string& host, const std::string& cdda_
     return true;
 }
 static void cd_dev_header(Machine* m) {
-    uint32_t H = lin(DOSSEG, D_CDDEV);
+    uint32_t H = lin(s_cdh_seg, s_cdh_off);
     ww(m, H + 0, 0xFFFF); ww(m, H + 2, 0xFFFF); ww(m, H + 4, 0xC800);     // 文字装置・IOCTL 対応
-    ww(m, H + 6, D_BLKDEV + 0x12); ww(m, H + 8, D_BLKDEV + 0x12);           // 戦略・割込み（RETF）
+    ww(m, H + 6, s_cdh_retf); ww(m, H + 8, s_cdh_retf);                     // 戦略・割込み（RETF）
     std::string nm = m->cfg.cd_device; nm.resize(8, ' ');
     for (int i = 0; i < 8; i++) mem_wb(m, H + 0x0A + i, (uint8_t)nm[i]);
     ww(m, H + 0x12, 0); mem_wb(m, H + 0x14, (uint8_t)(cd_letter(m) - 'A' + 1)); mem_wb(m, H + 0x15, 1);
@@ -2906,7 +3140,7 @@ static uint32_t r32(Machine* m, uint32_t a) { return rw(m, a) | ((uint32_t)rw(m,
 static uint16_t cd_ioctl_input(Machine* m, uint32_t cb) {
     uint8_t code = mem_rb(m, cb);
     switch (code) {
-    case 0: ww(m, cb + 1, D_CDDEV); ww(m, cb + 3, DOSSEG); cd_dev_header(m); break;     // 装置ヘッダ
+    case 0: ww(m, cb + 1, s_cdh_off); ww(m, cb + 3, s_cdh_seg); cd_dev_header(m); break;     // 装置ヘッダ
     case 1: { uint8_t mode = mem_rb(m, cb + 1); uint32_t p = cdda::position(); w32(m, cb + 2, mode == 1 ? redbook(p) : p); break; }   // ヘッドの位置
     case 4: { uint8_t v0, v1; cdda::get_volume(&v0, &v1);                                    // 音量
               const uint8_t ch[8] = {0, v0, 1, v1, 2, 0, 3, 0}; for (int i = 0; i < 8; i++) mem_wb(m, cb + 1 + i, ch[i]); break; }
@@ -2978,7 +3212,7 @@ static void mscdex(Machine* m) {
         if (!cd) return;
         cd_dev_header(m);
         uint32_t a = lin(ES(m), BX(m));
-        mem_wb(m, a, 0); ww(m, a + 1, D_CDDEV); ww(m, a + 3, DOSSEG);
+        mem_wb(m, a, 0); ww(m, a + 1, s_cdh_off); ww(m, a + 3, s_cdh_seg);
         return; }
     case 0x02: case 0x03: case 0x04: {   // 著作権・概要・書誌のファイル名（主ボリューム記述子から）
         if (!drv_ok) { bad_drive(); return; }
@@ -3108,6 +3342,7 @@ void dos_hle(Machine* m, uint8_t n) {
         else if ((ax & 0x00FF) == 0x00) SETAL(m, 0x00);
         break; }
     case HLE_SHELL: shell_step(m); break;
+    case HLE_DEVINIT: devload_step(m); break;
     case HLE_XMS: case HLE_INT67: xmsems_hle(m, n); break;
     default: break;
     }
@@ -3217,6 +3452,7 @@ void dos_init(Machine* m) {
         for (int i = 0; i < 3; i++) r[lin(ROMSEG, (uint16_t)(o2 + i))] = tail[i];
         s_shell_entry = o;
     }
+    s_devstub = bios_hle_stub(m, HLE_DEVINIT);   // CONFIG.SYS のドライバの戦略・割込みルーチンから戻る先
 
     // メモリの鎖: 先頭 MCB から 640KB まで
     uint16_t top = (uint16_t)(m->cfg.memory_kb * 64);

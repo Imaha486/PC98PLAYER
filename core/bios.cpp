@@ -42,6 +42,11 @@ static void set_vec(Machine* m, int vec, uint16_t seg, uint16_t off) {
     m->ram[vec * 4] = (uint8_t)off; m->ram[vec * 4 + 1] = (uint8_t)(off >> 8);
     m->ram[vec * 4 + 2] = (uint8_t)seg; m->ram[vec * 4 + 3] = (uint8_t)(seg >> 8);
 }
+// ROM の空きから n バイトを取る（中身は 0）。フロッピーから起動したときも残る場所
+uint16_t bios_rom_alloc(Machine* m, int n) {
+    std::vector<uint8_t> z((size_t)n, 0);
+    return put_stub(m, z.data(), n);
+}
 uint16_t bios_hle_stub(Machine* m, uint8_t n) {
     uint8_t code[3] = {0xF1, n, 0xCF};
     return put_stub(m, code, 3);
@@ -386,7 +391,7 @@ static void int18(Machine* m) {
         return;
     case 0x0A: {
         uint8_t al = AL(m);
-        m->ram[0x53C] = al;
+        m->ram[0x53C] = (uint8_t)(al | 0x80);   // bit7 = 高解像度（24kHz・400 ライン）のモード。マウスドライバなどが見て、グラフィックを 400 ラインで出し直す
         m->ram[0x53B] = (uint8_t)((al & 1) ? 19 : 15);   // 1 行の走査線数-1（カーソルの形を GDC に直接書くソフトが読む）
         m->gdcm.csrform[0] = (uint8_t)((m->gdcm.csrform[0] & 0xE0) | ((al & 1) ? 19 : 15));
         m->gdcm.csrform[1] = (uint8_t)(m->gdcm.csrform[1] & 0xE0);                       // カーソルは 0 ライン目から
@@ -827,7 +832,7 @@ void bios_init(Machine* m) {
     // BIOS ワークエリア
     r[0x500] = 0x00;
     r[0x501] = 0x80 | 0x04;         // 8MHz 系, メモリ 640KB
-    r[0x53C] = 0x00;
+    r[0x53C] = 0x80;               // CRT の状態: bit7 = 高解像度（24kHz・400 ライン）のモード
     r[0x53B] = 0x0F;               // 1 行の走査線数-1（25 行）。ここに 80h を足して CSRFORM に直接書くソフトがある
     r[0x54C] = 0x4E;                // 16 色ボードあり 等
     r[0x54D] = (uint8_t)(0x40 | (m->cfg.gdc_5mhz ? 0x20 : 0x00));   // EGC あり / bit5 = GDC 5MHz を使える（DIP SW 2-8）/ bit2 = いま 5MHz

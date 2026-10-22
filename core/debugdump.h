@@ -25,7 +25,8 @@ void dbg_note_int(Machine* m, uint8_t vec, bool hw);            // 割込みに�
 void dbg_note_int21_ret(Machine* m);                            // INT 21h の HLE が終わったとき（dos.cpp）
 void dbg_note_io(Machine* m, uint16_t port, uint16_t v, bool out, bool w16);   // I/O（machine.cpp）
 void dbg_note_text(const char* s);           // 目印（[stall] など）
-bool dbg_write(Machine* m, const std::string& dir, std::string* err);   // 書き出す
+// 書き出す。fb があれば最後の画面（640x400、0xRRGGBB）も PC98PLAYER.BMP に書く
+bool dbg_write(Machine* m, const std::string& dir, std::string* err, const uint32_t* fb = nullptr);
 
 // dos.cpp: MCB の鎖を文字にする
 std::string dos_debug_mcb(Machine* m);

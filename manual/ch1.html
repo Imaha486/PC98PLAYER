@@ -404,6 +404,7 @@ Start=A:\AUTOEXEC.BAT</pre>
 <table>
   <tr><th>項目</th><th>既定値</th><th>説明</th></tr>
   <tr><td><code>EMS=</code></td><td>1</td><td>1: EMS（EMM386 相当）を用意する。</td></tr>
+  <tr><td><code>LoadDevices=</code></td><td>1</td><td>1: 起動ドライブの CONFIG.SYS の <code>DEVICE=</code> のドライバ（MIDI・音楽のドライバなど）を組み込む。0: 組み込まない（<a href="#memory">1-10</a>）。</td></tr>
   <tr><td><code>EMSKB=</code></td><td>4096</td><td>EMS の容量（KB）。</td></tr>
   <tr><td><code>XMS=</code></td><td>1</td><td>1: XMS（HIMEM.SYS 相当）を用意する。</td></tr>
   <tr><td><code>XMSKB=</code></td><td>8192</td><td>XMS の容量（KB）。</td></tr>
@@ -450,7 +451,14 @@ ExitOnEnd=0</pre>
 
 <h2 id="memory">1-10. メモリ（EMS／XMS）の設定</h2>
 <p>実機で CONFIG.SYS に <code>HIMEM.SYS</code>（XMS）や <code>EMM386.EXE</code>（EMS）を組み込んでいた状態を再現します。
-ゲームの CONFIG.SYS に書かれたドライバは読み込まれません。代わりに、この設定で同じ機能を用意します。</p>
+ゲームの CONFIG.SYS に書かれた HIMEM.SYS・EMM386.EXE は読み込まれません。代わりに、この設定で同じ機能を用意します。</p>
+<p>ゲームのフォルダ（起動ドライブ）に本物の <code>CONFIG.SYS</code> があれば、<code>DEVICE=</code>・<code>DEVICEHIGH=</code> に書かれたほかのデバイスドライバ（MIDI や音楽のドライバなど）は、最初のプログラムを動かす前に組み込みます（<code>LoadDevices=0</code> で組み込まない）。</p>
+<ul>
+  <li>メモリの管理（HIMEM・EMM386・VEMM など）、CD-ROM（NECCDD など）、マウス、日本語入力（ATOK・VJE など）、SMARTDRV などのドライバは、PC98PLAYER が自分で持っているか、組み込むと困るので読みません。</li>
+  <li>文字装置のドライバだけを組み込みます（RAM ディスクなどのブロック装置は組み込みません）。<code>DEVICEHIGH=</code> も通常のメモリに読みます。</li>
+  <li>組み込んだドライバは、装置の鎖（INT 21h AH=52h）からたどれ、名前で開くこともできます。ただし、開いた装置への読み書き・IOCTL はドライバには渡しません。</li>
+  <li>MIDI のドライバ（MPU-401 用）は、<code>MIDI=1</code>（既定）で MIDI の音を出します。</li>
+</ul>
 <ul>
   <li>通常メモリの空きは、起動した直後でおよそ 627KB です。</li>
   <li>EMS や XMS があると落ちるゲームがあれば、<code>EMS=0</code>、<code>XMS=0</code> を 1 つずつ試してください。</li>
@@ -651,6 +659,14 @@ CDDA=BGM</pre>
   <tr><td><code>CDDAVolume=</code></td><td>100</td><td>CD-DA の音量（%）。</td></tr>
 </table>
 </div>
+
+<h3 id="cdboot">フロッピーから起動するゲーム（Boot=FD）の CD-ROM</h3>
+<p>起動ディスク（フロッピー）の MS-DOS で動き、CONFIG.SYS で CD-ROM のドライバ、AUTOEXEC.BAT で MSCDEX.EXE を組み込むゲームは、<code>Boot=FD</code> と <code>FloppyDisk=</code> に加えて <code>CDROM=</code>（と、必要なら <code>CDDA=</code>）を書けば、CD-DA の音楽が鳴ります。</p>
+<ul>
+  <li>CD-ROM のドライバ（NECCDD.SYS など）と MSCDEX.EXE は、CD-ROM の装置（ハードウェア）が無いので組み込みに失敗します（起動のときにエラーの表示が出ますが、そのままでかまいません）。代わりに、ゲームが呼ぶ MSCDEX の機能（INT 2Fh AH=15h。演奏・停止・トラック表など）には PC98PLAYER が答えます。</li>
+  <li>この場合、CD-ROM はドライブとしては見えません（CD の中のファイルは読めません）。CD-DA の音楽だけを使うゲーム向けです。CD のファイルを読むゲームは、ハードディスクにインストールして MS-DOS（<code>Start=</code>）で動かしてください。</li>
+  <li>装置名を開いて問い合わせる方法（INT 21h AX=4402h）は、フロッピーから起動したときは使えません。</li>
+</ul>
 
 <h3 id="autoexec">AUTOEXEC.BAT と CONFIG.SYS</h3>
 <p>CD-ROM 版のインストーラには、起動ドライブの <code>AUTOEXEC.BAT</code> を読んで MSCDEX の装置名（<code>/D:</code>）を調べ、ゲームの起動バッチに書き込むものがあります。PC98PLAYER のゲームのフォルダに <code>AUTOEXEC.BAT</code>・<code>CONFIG.SYS</code> が無いときは、読み出しに限って、今の設定どおりの中身（<code>MSCDEX.EXE /D:MSCD001 /L:Q</code> の行など）を見せます。実物はゲームのフォルダの <code>PC98PLAYER.SAV\</code> の中に作られます。ゲームのフォルダに本物の <code>AUTOEXEC.BAT</code> を置いたときは、そちらを使います。</p>

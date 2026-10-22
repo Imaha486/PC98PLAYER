@@ -44,6 +44,12 @@ std::vector<IntEv> s_ev; unsigned s_ev_pos = 0;
 std::vector<IntEv> s_lev; unsigned s_lev_pos = 0;
 std::unordered_map<uint64_t, unsigned> s_lev_last;   // 種類 → s_lev の通し番号
 std::vector<IoEv> s_io; unsigned s_io_pos = 0;
+// 画面の設定の I/O（GDC・モードF/F・表示バンク・画面モード）だけの長い記録
+const unsigned NG = 4096;
+std::vector<IoEv> s_gio; unsigned s_gio_pos = 0;
+inline bool is_video_port(uint16_t p) {
+    return p == 0x60 || p == 0x62 || p == 0xA0 || p == 0xA2 || p == 0x68 || p == 0x6A || p == 0xA4 || p == 0x9A0 || p == 0x9A2 || p == 0x9A8 || p == 0x70 || p == 0x72 || p == 0x74 || p == 0x76 || p == 0x78 || p == 0x7A;
+}
 std::vector<Snap> s_snap; unsigned s_snap_pos = 0;
 std::vector<Mark> s_mark; unsigned s_mark_pos = 0;
 uint32_t s_cur_ints[256];
@@ -77,7 +83,9 @@ static void fill_int(Machine* m, IntEv& e, uint8_t vec, int kind) {
 }
 static void long_note(const IntEv& e) {
     if (s_lev.empty()) s_lev.resize(NL);
-    uint64_t key = ((uint64_t)e.vec << 56) | ((uint64_t)e.kind << 48) | ((uint64_t)(e.ax >> 8) << 40) | ((uint64_t)e.cs << 16) | e.ip;
+    // ハードウェア割込みは番号だけで（割り込まれた場所はいろいろなので）、INT は番号・AH・呼んだ場所でまとめる
+    uint64_t key = e.kind == 0 ? ((uint64_t)e.vec << 56)
+                 : ((uint64_t)e.vec << 56) | ((uint64_t)e.kind << 48) | ((uint64_t)(e.ax >> 8) << 40) | ((uint64_t)e.cs << 16) | e.ip;
     auto it = s_lev_last.find(key);
     if (it != s_lev_last.end() && s_lev_pos - it->second < NL) {
         IntEv& l = s_lev[it->second % NL];
@@ -111,6 +119,10 @@ void dbg_note_io(Machine* m, uint16_t port, uint16_t v, bool out, bool w16) {
     if (s_io.empty()) s_io.resize(NO);
     IoEv& e = s_io[s_io_pos++ % NO];
     e.frame = frame_of(m); e.port = port; e.val = v; e.out = out; e.w16 = w16; e.cs = m->cpu.op_cs; e.ip = (uint16_t)m->cpu.op_ip;
+    if (out && is_video_port(port)) {
+        if (s_gio.empty()) s_gio.resize(NG);
+        s_gio[s_gio_pos++ % NG] = e;
+    }
 }
 void dbg_note_text(const char* s) {
     if (!g_dbg_on) return;
@@ -120,7 +132,7 @@ void dbg_note_text(const char* s) {
 }
 
 void dbg_begin(Machine* m) {
-    s_insn_pos = s_ev_pos = s_io_pos = s_snap_pos = s_mark_pos = s_lev_pos = 0; s_lev_last.clear();
+    s_insn_pos = s_ev_pos = s_io_pos = s_snap_pos = s_mark_pos = s_lev_pos = s_gio_pos = 0; s_lev_last.clear();
     memset(s_cur_ints, 0, sizeof s_cur_ints); memset(s_ints_total, 0, sizeof s_ints_total);
     for (int i = 0; i < 256; i++) s_ivt0[i] = (uint32_t)rw(m, i * 4) | ((uint32_t)rw(m, i * 4 + 2) << 16);
     s_ivt_ok = true;
@@ -175,7 +187,30 @@ static const char* when(Machine* m, uint32_t frame, char* buf, size_t n) {
     return buf;
 }
 
-bool dbg_write(Machine* m, const std::string& dir, std::string* err) {
+static void gdc_text(const char* name, const Gdc& g) {
+    ap("%s: 表示 %s  ZOOM=%02X  PITCH=%02X  CSRFORM=%02X %02X %02X\n", name, g.display ? "ON" : "OFF", g.zoom, g.pitch, g.csrform[0], g.csrform[1], g.csrform[2]);
+    ap("    SYNC:"); for (int i = 0; i < 8; i++) ap(" %02X", g.sync[i]);
+    ap("\n    PRAM（SCROLL）:"); for (int i = 0; i < 16; i++) ap(" %02X", g.pram[i]);
+    // 領域 1・2: 先頭（SAD、ワード）と行数（LEN）
+    for (int a = 0; a < 2; a++) {
+        const uint8_t* p = g.pram + a * 4;
+        uint32_t sad = p[0] | (p[1] << 8) | ((p[2] & 3) << 16); uint32_t len = ((p[2] >> 4) | (p[3] << 4)) & 0x3FF;
+        ap("\n    領域 %d: SAD=%05X（ワード） LEN=%u 行%s", a + 1, sad, len, (p[3] & 0x40) ? " IM" : "");
+    }
+    ap("\n    コマンド %02X  パラメータ %d 個  EAD=%05X\n", g.cmd, g.pcount, g.ead);
+}
+static void write_bmp(const std::string& path, const uint32_t* fb) {
+    const int W = 640, H = 400; std::vector<uint8_t> b(54 + W * H * 3);
+    auto w32 = [&](int o, uint32_t v) { b[o] = (uint8_t)v; b[o + 1] = (uint8_t)(v >> 8); b[o + 2] = (uint8_t)(v >> 16); b[o + 3] = (uint8_t)(v >> 24); };
+    b[0] = 'B'; b[1] = 'M'; w32(2, (uint32_t)b.size()); w32(10, 54); w32(14, 40); w32(18, W); w32(22, H); b[26] = 1; b[28] = 24; w32(34, W * H * 3);
+    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+        uint32_t c = fb[(H - 1 - y) * W + x]; uint8_t* d = &b[54 + (y * W + x) * 3];
+        d[0] = (uint8_t)c; d[1] = (uint8_t)(c >> 8); d[2] = (uint8_t)(c >> 16);
+    }
+    put_file(path, b.data(), b.size());
+}
+
+bool dbg_write(Machine* m, const std::string& dir, std::string* err, const uint32_t* fb) {
     if (!m) return false;
     std::string tp = hostfs::join(dir, "PC98PLAYER.DEBUG"), mp = hostfs::join(dir, "PC98PLAYER.MEM");
     s_out.clear(); s_out.reserve(4 << 20);
@@ -207,6 +242,19 @@ bool dbg_write(Machine* m, const std::string& dir, std::string* err) {
         ap("  BP=%04X → 古い BP=%04X 戻り %04X（%04X:%04X）引数 %04X %04X %04X\n", bp, nb, r1, r2, r1,
                 rw(m, sa + (uint16_t)(bp + 6)), rw(m, sa + (uint16_t)(bp + 8)), rw(m, sa + (uint16_t)(bp + 10)));
         if (nb <= bp) break; bp = nb; } }
+
+    ap("\n=== 画面 ===\n");
+    gdc_text("文字の GDC（マスタ）", m->gdcm);
+    gdc_text("グラフィックの GDC（スレーブ）", m->gdcs);
+    ap("グラフィックの GDC のクロック: %s\n", m->gdc_clk5 ? "5MHz（PITCH はバイト単位）" : "2.5MHz（PITCH はワード単位）");
+    ap("200 ライン: %d（下半分: %d）  カラー: %d  表示バンク %d  描画バンク %d\n", m->gfx_200, m->gfx_200_lower, m->gfx_color, m->disp_bank, m->draw_bank);
+    ap("モードF/F（68h）:"); for (int i = 0; i < 8; i++) ap(" %d", m->modeff[i]);
+    ap("\nモードF/F2（6Ah）:"); for (int i = 0; i < 8; i++) ap(" %d", m->modeff2[i]);
+    ap("\nGRCG: モード %02X タイル %02X %02X %02X %02X   EGC: 使える %d  ACCESS=%04X FGBG=%04X OPE=%04X FG=%04X MASK=%04X BG=%04X SFT=%04X LENG=%04X\n",
+       m->grcg_mode, m->grcg_tile[0], m->grcg_tile[1], m->grcg_tile[2], m->grcg_tile[3], m->egc_enabled,
+       m->egc.access, m->egc.fgbg, m->egc.ope, m->egc.fg, m->egc.mask, m->egc.bg, m->egc.sft, m->egc.leng);
+    ap("パレット（G R B）:"); for (int i = 0; i < 16; i++) ap(" %X:%X%X%X", i, m->pal[i][0], m->pal[i][1], m->pal[i][2]);
+    ap("\n（PC98PLAYER.VRAM: 0x00000 からテキスト VRAM 16KB、0x04000 からグラフィック VRAM バンク 0 のプレーン B/R/G/I（各 32KB）、続いてバンク 1）\n");
 
     ap("\n=== PIC / PIT ===\n");
     for (int i = 0; i < 2; i++) ap("PIC%d（%s）: IMR=%02X IRR=%02X ISR=%02X ベース=%02X\n", i, i ? "スレーブ" : "マスタ", m->pic[i].imr, m->pic[i].irr, m->pic[i].isr, m->pic[i].base);
@@ -247,7 +295,7 @@ bool dbg_write(Machine* m, const std::string& dir, std::string* err) {
 
     if (!s_lev.empty() && s_lev_pos) {
         unsigned n = s_lev_pos < NL ? s_lev_pos : NL;
-        ap("\n=== 割込みの長い記録（直近 %u 件、古い順。同じ割込み（番号・AH・場所が同じ）が 0.5 秒以内に続いたものは 1 件にまとめて回数を書く）===\n", n);
+        ap("\n=== 割込みの長い記録（直近 %u 件、古い順。同じ割込み（ハードウェアは番号、INT は番号・AH・呼んだ場所が同じ）が 0.5 秒以内に続いたものは 1 件にまとめて回数を書く）===\n", n);
         for (unsigned k = 0; k < n; k++) {
             const IntEv& e = s_lev[(s_lev_pos - n + k) % NL];
             const char* kd = e.kind == 0 ? "HW   " : e.kind == 1 ? "INT  " : "RET21";
@@ -268,6 +316,25 @@ bool dbg_write(Machine* m, const std::string& dir, std::string* err) {
             ap("[%s] %s %02X %s %04X:%04X AX=%04X BX=%04X CX=%04X DX=%04X SI=%04X DI=%04X DS=%04X ES=%04X SS:SP=%04X:%04X FL=%04X%s [SP] %04X %04X %04X %04X\n",
                     when(m, e.frame, tb, sizeof tb), kd, e.vec, e.kind == 2 ? "戻り先" : "場所", e.cs, e.ip, e.ax, e.bx, e.cx, e.dx, e.si, e.di, e.ds, e.es, e.ss, e.sp, e.fl,
                     e.kind == 2 ? ((e.fl & FL_CF) ? " CF=1（エラー）" : " CF=0") : "", e.stk[0], e.stk[1], e.stk[2], e.stk[3]);
+        }
+    }
+
+    if (!s_gio.empty() && s_gio_pos) {
+        unsigned n = s_gio_pos < NG ? s_gio_pos : NG;
+        ap("\n=== 画面の設定の OUT（直近 %u 回、古い順。GDC 60/62・A0/A2、モードF/F 68/6A、表示バンク A4、CRTC 70～7A、9A0/9A2/9A8）===\n", n);
+        for (unsigned k = 0; k < n; k++) {
+            const IoEv& e = s_gio[(s_gio_pos - n + k) % NG];
+            const char* what = "";
+            if (e.port == 0xA2 || e.port == 0x62) {
+                switch (e.val & 0xFF) {
+                case 0x0C: case 0x0D: what = "（START/STOP）"; break; case 0x0E: case 0x0F: what = "（SYNC）"; break;
+                case 0x47: what = "（PITCH）"; break; case 0x4B: what = "（CSRFORM）"; break; case 0x46: what = "（ZOOM）"; break;
+                case 0x49: what = "（CSRW）"; break; case 0x4A: what = "（MASK）"; break; case 0x4C: what = "（VECTW）"; break;
+                case 0x6B: what = "（START）"; break; case 0x6F: what = "（VSYNC）"; break;
+                default: if ((e.val & 0xF0) == 0x70) what = "（SCROLL / PRAM）"; break;
+                }
+            }
+            ap("[%s] OUT %04X <- %02X%s  @%04X:%04X\n", when(m, e.frame, tb, sizeof tb), e.port, e.val & 0xFF, what, e.cs, e.ip);
         }
     }
 
@@ -299,5 +366,11 @@ bool dbg_write(Machine* m, const std::string& dir, std::string* err) {
     s_out.clear(); s_out.shrink_to_fit();
     if (!ok) { if (err) *err = "書けません: " + tp; return false; }
     if (!put_file(mp, m->ram, 0x100000)) { if (err) *err = "書けません: " + mp; return false; }
+    {   // VRAM
+        std::vector<uint8_t> v(sizeof m->tvram + sizeof m->gvram);
+        memcpy(v.data(), m->tvram, sizeof m->tvram); memcpy(v.data() + sizeof m->tvram, m->gvram, sizeof m->gvram);
+        put_file(hostfs::join(dir, "PC98PLAYER.VRAM"), v.data(), v.size());
+    }
+    if (fb) write_bmp(hostfs::join(dir, "PC98PLAYER.BMP"), fb);
     return true;
 }

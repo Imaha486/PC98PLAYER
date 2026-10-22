@@ -105,6 +105,7 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
     ps->cfg.emulate_mouse = I("MOUSEDRIVER", 1) != 0;
     ps->cfg.idle_skip = I("IDLESKIP", 1) != 0;
     ps->cfg.trace = I("TRACE", 0);
+    ps->cfg.load_devices = I("LOADDEVICES", 1) != 0;   // 0: CONFIG.SYS の DEVICE= のドライバを組み込まない
     ps->cfg.key_repeat = I("KEYREPEAT", 1);
     std::string ver = G("DOSVERSION", "5.00");
     {
@@ -410,6 +411,7 @@ bool Player::init(const PlayerSettings& s, std::string* err) {
     floppy::clear_swap_flags();
     g_dbg_on = ps.cfg.trace >= 2;   // Trace=2: 終わる直前のようすを PC98PLAYER.DEBUG に書く
     dbg_begin(m);
+    { void dos_cd_boot_mode(Machine* m); extern uint32_t g_int2f15_redirect; g_int2f15_redirect = 0; if (ps.cfg.boot_fd) dos_cd_boot_mode(m); }
     if (ps.cfg.boot_fd) {
         // ブートモード: 1 台目の IPL から起動する
         std::string why;
@@ -660,7 +662,7 @@ void Player::run_frame(bool render_video, bool render_audio) {
 void Player::shutdown() {
     if (m && g_dbg_on) {
         std::string e;
-        if (dbg_write(m, ps.cfg.root, &e)) plog("[debug] PC98PLAYER.DEBUG と PC98PLAYER.MEM を書きました\n");
+        if (dbg_write(m, ps.cfg.root, &e, fb)) plog("[debug] PC98PLAYER.DEBUG と PC98PLAYER.MEM を書きました\n");
         else plog("[debug] %s\n", e.c_str());
         g_dbg_on = false;
     }

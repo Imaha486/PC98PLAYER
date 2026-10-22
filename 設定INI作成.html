@@ -138,6 +138,7 @@ const SCHEMA = [
     { key: "IdleSkip", label: "待ちの空回りを飛ばす", type: "check", def: "1", on: "1", off: "0", text: "割込み待ちの間は命令を実行せずに待つ", help: "おかしな動きをするときの確認用に外せます。" },
     { key: "MemoryKB", label: "通常メモリ", type: "number", def: "640", min: 128, max: 640, unit: "KB" },
     { key: "EMS", label: "EMS", type: "check", def: "1", on: "1", off: "0", text: "EMS（EMM386 相当）を用意する" },
+    { key: "LoadDevices", label: "CONFIG.SYS のドライバ", type: "check", def: "1", on: "1", off: "0", text: "CONFIG.SYS の DEVICE= のドライバを組み込む", help: "ゲームのフォルダの CONFIG.SYS に書かれた MIDI や音楽のドライバなどを、ゲームより先に組み込みます。メモリ・CD-ROM・マウス・日本語入力のドライバは組み込みません。" },
     { key: "EMSKB", label: "EMS の容量", type: "number", def: "4096", min: 0, max: 32768, unit: "KB" },
     { key: "XMS", label: "XMS", type: "check", def: "1", on: "1", off: "0", text: "XMS（HIMEM.SYS 相当）を用意する" },
     { key: "XMSKB", label: "XMS の容量", type: "number", def: "8192", min: 0, max: 65536, unit: "KB" },

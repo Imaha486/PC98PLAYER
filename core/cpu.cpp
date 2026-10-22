@@ -25,7 +25,8 @@ void plog(const char* fmt, ...);
 
 int g_irq_hint = 0;
 int g_trace_int = -1;
-uint16_t g_ifoff_cs = 0, g_ifoff_ip = 0; int g_ifoff_kind = 0; bool g_if_track = false;   // 調べもの: 最後に割込みを禁止した命令（1 = CLI, 2 = POPF）
+uint16_t g_ifoff_cs = 0, g_ifoff_ip = 0; int g_ifoff_kind = 0; bool g_if_track = false;
+uint32_t g_int2f15_redirect = 0;   // 0 以外: INT 2Fh AH=15h をこの入口（セグメント << 16 | オフセット）へ回す   // 調べもの: 最後に割込みを禁止した命令（1 = CLI, 2 = POPF）
 unsigned long long g_frame_dbg;
 int g_prof_cs = -1; unsigned* g_prof = nullptr;      // Machine が「受け付け待ちの IRQ があるかも」を立てる
 
@@ -1055,6 +1056,13 @@ static void step() {
     case 0xCD: { uint8_t v = f8();
         { extern unsigned* g_stall_int; if (g_stall_int) g_stall_int[v]++; }
         if (g_dbg_on) dbg_note_int(M, v, false);
+        // フロッピーから起動したとき: INT 2Fh AH=15h（MSCDEX）はベクタを通さず PC98PLAYER の MSCDEX へ
+        if (v == 0x2F && g_int2f15_redirect && ((C->r[EAX] >> 8) & 0xFF) == 0x15 && !pmode()) {
+            push16((uint16_t)(C->fl | 0x0002)); push16(C->sr[CS_]); push16((uint16_t)C->ip);
+            C->fl &= ~(FL_IF | FL_TF);
+            load_seg_real(CS_, (uint16_t)(g_int2f15_redirect >> 16)); C->ip = g_int2f15_redirect & 0xFFFF;
+            d_cyc += 40;
+            return; }
         if (v == g_trace_int) { s_tr_cs = C->sr[CS_]; s_tr_ip = C->ip; s_tr_on = 1; }
         if (v == g_trace_int) fprintf(stderr, "[f%llu int %02X] AX=%04X BX=%04X CX=%04X DX=%04X DS=%04X ES=%04X from %04X:%04X\n", (unsigned long long)g_frame_dbg, v, C->r[EAX] & 0xFFFF, C->r[EBX] & 0xFFFF, C->r[ECX] & 0xFFFF, C->r[EDX] & 0xFFFF, C->sr[DS_], C->sr[ES_], C->op_cs, C->op_ip);
         do_int(v); return; }

@@ -164,10 +164,12 @@ ExitOnEnd=0</pre></li>
 <ol class="steps">
   <li><code>PC98PLAYER.INI</code> に <code>Trace=2</code> と <code>ExitOnEnd=0</code> を書きます。</li>
   <li>不具合が起きるところまで進め、止まったらそのまま 15 秒ほど待ってから、ウインドウを閉じて終了します。</li>
-  <li>ゲームのフォルダに、<code>PC98PLAYER.LOG</code> のほかに次の 2 つができます。3 つそろえて送ってください。
+  <li>ゲームのフォルダに、<code>PC98PLAYER.LOG</code> のほかに次の 4 つができます。全部そろえて送ってください。
     <ul>
-      <li><code>PC98PLAYER.DEBUG</code>（テキスト）… 終わったときの CPU のレジスタ・スタック・割込みベクタ・メモリの使われ方、終わる前 10 秒の 1 秒ごとの様子、直近の割込み・I/O ポート・命令の記録。</li>
+      <li><code>PC98PLAYER.DEBUG</code>（テキスト）… 終わったときの CPU のレジスタ・スタック・画面の設定（GDC・パレットなど）・割込みベクタ・メモリの使われ方、終わる前 10 秒の 1 秒ごとの様子、直近の割込み・I/O ポート・命令の記録。</li>
       <li><code>PC98PLAYER.MEM</code>（1MB）… 終わったときのメモリの中身そのまま。</li>
+      <li><code>PC98PLAYER.VRAM</code> … 終わったときのテキスト VRAM とグラフィック VRAM の中身。</li>
+      <li><code>PC98PLAYER.BMP</code> … 終わったときの画面。</li>
     </ul></li>
   <li><code>Trace=2</code> の間は、命令を 1 つずつ記録するので動きが少し重くなります。調べ終わったら <code>Trace=0</code> に戻してください。</li>
 </ol>
@@ -240,7 +242,7 @@ ExitOnEnd=0</pre></li>
   <li>ROM のグラフィック LIO（INT A0h-AFh）のうち、円（GCIRCLE）・漢字（GPUT2）・スクロール（GROLL）。呼ばれても止まらずに「正常終了」を返しますが、描きません（点・線・箱・境界までの塗りつぶし（GPAINT）・GGET/GPUT1 は描きます）</li>
   <li>サウンド BIOS（INT D2h）の MML 演奏などの機能。<code>SoundBIOS=1</code> で使えるのは、レジスタ書き込み・発音・音色・音量だけです（MIDI プレーヤーの MIMPI の FM 演奏で使う分）</li>
   <li>ADPCM（スピークボード・ちびおと等）、MIDI のインテリジェントモードのうちボード側でトラックを演奏する機能</li>
-  <li>CONFIG.SYS に書かれたデバイスドライバの読み込み（EMS・XMS・マウスは PC98PLAYER 側で用意します）</li>
+  <li>CONFIG.SYS に書かれたブロック装置のドライバ（RAM ディスクなど）と、組み込んだ文字装置への読み書き・IOCTL（文字装置のドライバの組み込み自体はできます。<a href="ch1.html#memory">第一章 1-10</a>）</li>
   <li>CD の入れ替え（2 枚組の CD-ROM のゲーム）。CD-ROM のデータの読み出しと CD-DA の演奏には対応しています（<a href="ch1.html#cdrom">第一章 1-13</a>）</li>
 </ul>
 

@@ -96,6 +96,13 @@ void machine_raise_irq(Machine* m, int irq) {
     else { m->pic[1].irr |= (uint8_t)(1u << (irq - 8)); m->pic[0].irr |= 0x80; }
     pic_update_hint(m);
 }
+// 割込みの線が下がった（受け付ける前なら要求を取り下げる。8259 は線が下がると IRR も消える）
+void machine_lower_irq(Machine* m, int irq) {
+    if (irq < 0 || irq > 15) return;
+    if (irq < 8) m->pic[0].irr &= (uint8_t)~(1u << irq);
+    else { m->pic[1].irr &= (uint8_t)~(1u << (irq - 8)); if (!m->pic[1].irr) m->pic[0].irr &= (uint8_t)~0x80; }
+    pic_update_hint(m);
+}
 void machine_eoi(Machine* m, int irq) {
     if (irq >= 8) {
         m->pic[1].isr &= (uint8_t)~(1u << (irq - 8));
@@ -443,7 +450,9 @@ static void cg_write(Machine* m, uint32_t idx, uint8_t v);
 // ---- MPU-PC98II -------------------------------------------------------------
 static void mpu_push(Machine* m, uint8_t v) {
     Mpu& u = m->mpu;
-    if (u.rcnt < sizeof(u.recv)) { u.recv[(u.rpos + u.rcnt) & 15] = v; u.rcnt++; }
+    if (v == 0xFD && u.rcnt >= 8) return;   // クロック・トゥ・ホストは、読まれずにたまっているときは捨てる（ACK を入れる場所を残す）
+    if (u.rcnt >= sizeof(u.recv)) { u.rpos = (u.rpos + 1) & 15; u.rcnt--; }   // いっぱいなら古いものを捨てる（ACK の FEh を落とさない）
+    u.recv[(u.rpos + u.rcnt) & 15] = v; u.rcnt++;
     machine_raise_irq(m, m->cfg.midi_irq);
 }
 static void mpu_defaults(Mpu& u) {
@@ -525,6 +534,9 @@ void mpu_advance(Machine* m, uint32_t t) {
 static uint8_t mpu_read_data(Machine* m) {
     Mpu& u = m->mpu;
     if (u.rcnt) { u.last = u.recv[u.rpos]; u.rpos = (u.rpos + 1) & 15; u.rcnt--; }
+    // MPU の割込みの線は、受信データがある間だけ上がっている。読み終えたら下げる
+    //（割込みの中で ACK を読み終えたあとに要求が残ると、もう一度割込みに入って、来ないデータを待ち続けるドライバがある）
+    if (!u.rcnt) machine_lower_irq(m, m->cfg.midi_irq);
     return u.last;
 }
 
@@ -830,7 +842,7 @@ void hle_trap(Machine* m, uint8_t n) {
     switch (n) {
     case HLE_INT20: case HLE_INT21: case HLE_INT25: case HLE_INT26: case HLE_INT27:
     case HLE_INT28: case HLE_INT29: case HLE_INT2F: case HLE_INT67: case HLE_XMS:
-    case HLE_SHELL: case HLE_EXIT:
+    case HLE_SHELL: case HLE_EXIT: case HLE_DEVINIT:
         dos_hle(m, n); break;
     default:
         bios_hle(m, n); break;

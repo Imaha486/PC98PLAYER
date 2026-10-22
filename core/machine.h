@@ -148,6 +148,7 @@ struct Config {
     char     cd_drive = 'Q';         // CD-ROM のドライブ名（MSCDEX の既定と同じ Q:）
     std::string cd_device = "MSCD001"; // CD-ROM の装置名（MSCDEX の /D: と同じ。ゲームが開いて確かめる）
     std::string cdda_dir;            // CD-DA の音のフォルダ（ホストのパス。空なら無し）
+    bool     load_devices = true;    // 起動ドライブの CONFIG.SYS の DEVICE= のドライバを組み込む（LoadDevices=）
     int      cd_type = 0;            // CD の種類（CDType=）: 0 = 自動、1 = データの CD、2 = 音楽 CD（データトラックなし）
     char     current_drive = 0;      // 起動時のカレントドライブ（0 = Start= のドライブ、無ければゲームのドライブ）
     std::string current_dir;         // 起動時のカレントディレクトリ（例 A:\NANPA\。空 = 指定なし）
@@ -404,6 +405,7 @@ enum {
     HLE_XMS        = 0xE0,
     HLE_MSIRQ      = 0xF0,   // マウスドライバの IRQ13: ユーザのイベントハンドラを呼ぶか決める
     HLE_MSIRQ_END  = 0xF1,   // ハンドラから戻った
+    HLE_DEVINIT    = 0xFC,   // CONFIG.SYS のドライバの戦略・割込みルーチンから戻った
     HLE_SHELL      = 0xFD,   // シェル（バッチ）の次の行へ
     HLE_EXIT       = 0xFE,
     HLE_NOP        = 0xFF,
