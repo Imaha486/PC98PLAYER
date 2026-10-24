@@ -1,4 +1,5 @@
 // 検証用ハーネス（Linux）: ウインドウを出さずに走らせ、画面と音をファイルへ出す
+#include "../core/cdvirt.h"
 #include "../core/player.h"
 #include "../core/hostfs.h"
 #include <stdio.h>
@@ -119,6 +120,9 @@ int main(int argc, char** argv) {
             if (k.down == 2) { if (k.frame == f) machine_key(p->m, (uint8_t)k.sc, true); if (k.frame + 6 == f) machine_key(p->m, (uint8_t)k.sc, false); }
             else if (k.frame == f) machine_key(p->m, (uint8_t)k.sc, k.down != 0);
         }
+        if (getenv("POKE")) {   // POKE=開始フレーム:seg:off:値（それ以降、毎フレーム書く）
+            unsigned pf, ps2, po, pv; if (sscanf(getenv("POKE"), "%u:%x:%x:%x", &pf, &ps2, &po, &pv) == 4 && (unsigned)f >= pf) p->m->ram[((ps2 << 4) + po) & 0xFFFFF] = (uint8_t)pv;
+        }
         extern unsigned g_opna_hist[2][256];
         if (f == (getenv("HISTF") ? atoi(getenv("HISTF")) : 2100)) memset(g_opna_hist, 0, sizeof(g_opna_hist));
         { extern int g_prof_cs; extern unsigned* g_prof; if (f == (getenv("PROFF") ? atoi(getenv("PROFF")) : 2100) && getenv("PROFCS")) { g_prof = (unsigned*)calloc(65536, 4); g_prof_cs = (int)strtol(getenv("PROFCS"), 0, 16); } }
@@ -204,6 +208,11 @@ int main(int argc, char** argv) {
             for (int c = 0; c < 80; c++) { uint32_t cell = (tsad + r * 80 + c) & 0xFFF; fprintf(stderr, " %02X%02X/%02X", p->m->tvram[cell * 2], p->m->tvram[cell * 2 + 1], p->m->tvram[0x2000 + cell * 2]); }
             fprintf(stderr, "\n");
         }
+    }
+    if (getenv("CDVIRT_DUMP") && cdvirt::active()) {   // フォルダの CD を ISO に書き出す（確かめ用）
+        FILE* o = fopen(getenv("CDVIRT_DUMP"), "wb"); uint8_t sec[2048];
+        for (uint32_t l = 0; o && l < cdvirt::sectors(); l++) { cdvirt::read_sector(l, sec); fwrite(sec, 1, 2048, o); }
+        if (o) fclose(o);
     }
     if (getenv("DUMPRAM")) { FILE* df = fopen(getenv("DUMPRAM"), "wb"); if (df) { fwrite(p->m->ram, 1, 0x100000, df); fclose(df); } }
     { extern unsigned* g_prof; if (g_prof) { for (int i = 0; i < 65536; i++) if (g_prof[i]) fprintf(stderr, "%04X:%u ", i, g_prof[i]); fprintf(stderr, "\n"); } }

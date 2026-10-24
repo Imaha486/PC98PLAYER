@@ -117,8 +117,9 @@ CurrentDirectory=    ; 起動時のカレントディレクトリ（例 A:\NANPA
 GDCClock=2.5         ; グラフィック GDC のクロック（DIP SW 2-8）。2.5 / 5
 FreeSpaceMB=96       ; ゲームのドライブの空き容量として見せる大きさ（MB）
 MidiSpeedFix=100     ; MIDI の演奏速度 %（10〜1000。MPU のテンポ＝クロック・トゥ・ホストだけを速める）
-EMS=1                ; EMS（EMM386 相当）。EMSKB=4096 で容量
+EMS=1                ; EMS（EMM386 相当）。EMSKB=4096 で容量。書かなければ CONFIG.SYS の NOEMS に従う
 LoadDevices=1        ; 起動ドライブの CONFIG.SYS の DEVICE= のドライバ（MIDI・音楽のドライバなど）を組み込む（0 で組み込まない）
+AVSDRV=              ; PC-9821 の PCM ドライバ AVSDRV.SYS の代わり（INT D9h）。書かなければ CONFIG.SYS にあるときだけ。1 でいつも、0 で用意しない
 XMS=1                ; XMS（HIMEM.SYS 相当）。XMSKB=8192 で容量
 ExtMemMB=8           ; 拡張メモリ（1MB より上の RAM、MB）。自分で保護モードに入るゲーム向け。0 で無し
 FirstMCB=0200        ; 先頭 MCB のセグメント（16 進）。空きメモリの始まり。ソフトによって調整

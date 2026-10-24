@@ -53,6 +53,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="core\cpu.cpp" />
+    <ClCompile Include="core\avsdrv.cpp" />
     <ClCompile Include="core\machine.cpp" />
     <ClCompile Include="core\bios.cpp" />
     <ClCompile Include="core\dos.cpp" />
@@ -74,6 +75,7 @@
     <ClCompile Include="core\fatfs.cpp" />
     <ClCompile Include="core\isofs.cpp" />
     <ClCompile Include="core\cdda.cpp" />
+    <ClCompile Include="core\cdvirt.cpp" />
     <ClCompile Include="core\debugdump.cpp" />
     <ClCompile Include="core\gdcdraw.cpp" />
     <ClCompile Include="win32\main.cpp" />

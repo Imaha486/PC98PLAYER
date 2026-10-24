@@ -40,8 +40,16 @@ static inline uint8_t mem_rb(Machine* m, uint32_t a) {
     if (a < 0xA0000u || ext_ram(a)) return g_ram[a];
     return mem_rb_slow(m, a);
 }
+#ifdef PC98P_WATCH
+extern uint32_t g_watch_lo, g_watch_hi;
+void watch_hit(Machine* m, uint32_t a, uint32_t v, int w);
+#define WATCHCHK(a, v, w) do { if ((a) + (w) > g_watch_lo && (a) < g_watch_hi) watch_hit(m, (a), (v), (w)); } while (0)
+#else
+#define WATCHCHK(a, v, w) do {} while (0)
+#endif
 static inline void mem_wb(Machine* m, uint32_t a, uint8_t v) {
     a = lin_mask(a);
+    WATCHCHK(a, v, 1);
     if (a < 0xA0000u || ext_ram(a)) { if (g_ram[a] != v) { g_ram[a] = v; g_side_fx++; } return; }   // 同じ値の書き込みは影響なし
     g_side_fx++;
     mem_wb_slow(m, a, v);
@@ -53,6 +61,7 @@ static inline uint16_t mem_rw(Machine* m, uint32_t a) {
 }
 static inline void mem_ww(Machine* m, uint32_t a, uint16_t v) {
     uint32_t b = lin_mask(a);
+    WATCHCHK(b, v, 2);
     if (b < 0x9FFFFu || (b >= 0x100000u && b + 1 < g_ram_top)) {
         if (g_ram[b] != (uint8_t)v || g_ram[b + 1] != (uint8_t)(v >> 8)) { g_ram[b] = (uint8_t)v; g_ram[b + 1] = (uint8_t)(v >> 8); g_side_fx++; }
         return;

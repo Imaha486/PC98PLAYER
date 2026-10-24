@@ -199,7 +199,18 @@ static void ems_unmap_handle(Machine* m, int h) {
 // 57h 用: 領域の 1 バイトずつの読み書き（通常メモリ or EMS）
 struct EmsRegion { uint8_t type; uint16_t h, off, segpage; };
 static bool ems_region_addr(const EmsRegion& r, uint32_t i, uint8_t** host, uint32_t* guest) {
-    if (r.type == 0) { *host = nullptr; *guest = lin(r.segpage, 0) + r.off + i; return true; }
+    if (r.type == 0) {
+        uint32_t g = lin(r.segpage, 0) + r.off + i;
+        // ページフレームの中で、論理ページが割り当てられているところは、その論理ページ（の本体）を読み書きする。
+        // （フレームの RAM と論理ページの本体の両方を書いて、あとで片方が古い中身で上書きされないように）
+        uint32_t flo = lin(EMS_FRAME_SEG, 0);
+        if (g >= flo && g < flo + 4 * EMS_PAGE) {
+            int fp = (int)((g - flo) / EMS_PAGE);
+            uint8_t* p = page_ptr(s_frame[fp][0], s_frame[fp][1]);
+            if (p) { *host = p + ((g - flo) % EMS_PAGE); return true; }
+        }
+        *host = nullptr; *guest = g; return true;
+    }
     uint32_t o = (uint32_t)r.off + i;
     uint8_t* p = page_ptr(r.h, r.segpage + (int)(o / EMS_PAGE));
     if (!p) return false;
@@ -360,13 +371,7 @@ static void ems_call(Machine* m) {
             if (hp) *hp = t[i]; else mem_wb(m, g, t[i]);
         }
         if (AL(m) == 1) for (uint32_t i = 0; i < len; i++) { uint8_t* hp; uint32_t g; ems_region_addr(a, i, &hp, &g); if (hp) *hp = t2[i]; else mem_wb(m, g, t2[i]); }
-        // 通常メモリ側にフレームが含まれていた場合は、そちらの内容を正にする
-        bool frame_touched = false;
-        for (const EmsRegion* r : {&a, &b}) if (r->type == 0) {
-            uint32_t lo = lin(r->segpage, r->off), hi = lo + len, flo = lin(EMS_FRAME_SEG, 0), fhi = flo + 4 * EMS_PAGE;
-            if (lo < fhi && hi > flo) frame_touched = true;
-        }
-        if (frame_touched) ems_flush_all(m);
+        // フレームに割り当てられている論理ページの中身が変わったかもしれないので、フレームへ写し直す
         ems_reload_all(m);
         ret(0); return; }
     case 0x58: {
@@ -408,6 +413,7 @@ void xmsems_init(Machine* m) {
     s_ems.clear(); s_ems.resize(1); s_ems[0].used = true;   // ハンドル 0（システム用、0 ページ）
     s_ems_total_pages = m->cfg.ems ? (uint32_t)(m->cfg.ems_kb / 16) : 0;
     for (int p = 0; p < 4; p++) s_frame[p][0] = s_frame[p][1] = -1;
+    if (m->cfg.ems_from_config) plog("[ems] ゲームの CONFIG.SYS に NOEMS があるので、EMS は出しません（INI に EMS=1 と書けば出します）\n");
     // XMS の入口: F1 E0 / RETF
     {
         uint16_t o = bios_hle_stub(m, HLE_XMS);

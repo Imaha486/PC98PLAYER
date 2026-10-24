@@ -82,6 +82,35 @@ int Ini::geti(const std::string& key, int def) const {
     return atoi(lv.c_str());
 }
 
+// ゲームのフォルダの CONFIG.SYS が、EMS を使わない設定（EMM386 などに /NOEMS や NOEMS）か
+//  ゲームによっては、EMS が無いことを前提に作られていて、EMS があると別の（不具合のある）道を通る。
+static bool config_sys_noems(const std::string& root) {
+    std::vector<HostDirEntry> l;
+    if (root.empty() || !hostfs::list_dir(root, l)) return false;
+    std::string p;
+    for (auto& e : l) if (!e.is_dir && up(e.name) == "CONFIG.SYS") p = hostfs::join(root, e.name);
+    if (p.empty()) return false;
+    void* h = hostfs::open(p, 0, false, false);
+    if (!h) return false;
+    std::string text; char buf[4096]; int n;
+    while ((n = hostfs::read(h, buf, sizeof buf)) > 0 && text.size() < 65536) text.append(buf, (size_t)n);
+    hostfs::close(h);
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t e = text.find_first_of("\r\n\x1A", pos);
+        std::string line = up(trim(text.substr(pos, e == std::string::npos ? std::string::npos : e - pos)));
+        pos = e == std::string::npos ? text.size() : e + 1;
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = trim(line.substr(0, eq));
+        if (key != "DEVICE" && key != "DEVICEHIGH") continue;
+        std::string v = line.substr(eq + 1);
+        bool emm = v.find("EMM386") != std::string::npos || v.find("EMM.SYS") != std::string::npos || v.find("MELWARE") != std::string::npos;
+        if (emm && v.find("NOEMS") != std::string::npos) return true;
+    }
+    return false;
+}
+
 bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSettings* ps) {
     const char* S = "PC98PLAYER.";
     auto G = [&](const char* k, const char* d) { return ini.get(std::string(S) + k, d); };
@@ -105,7 +134,8 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
     ps->cfg.emulate_mouse = I("MOUSEDRIVER", 1) != 0;
     ps->cfg.idle_skip = I("IDLESKIP", 1) != 0;
     ps->cfg.trace = I("TRACE", 0);
-    ps->cfg.load_devices = I("LOADDEVICES", 1) != 0;   // 0: CONFIG.SYS の DEVICE= のドライバを組み込まない
+    ps->cfg.load_devices = I("LOADDEVICES", 1) != 0;
+    { std::string av = G("AVSDRV", ""); ps->cfg.avsdrv = av.empty() ? -1 : (I("AVSDRV", 1) ? 1 : 0); }   // 0: CONFIG.SYS の DEVICE= のドライバを組み込まない
     ps->cfg.key_repeat = I("KEYREPEAT", 1);
     std::string ver = G("DOSVERSION", "5.00");
     {
@@ -214,7 +244,11 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
         }
         ps->cfg.floppy_drive2 = c2;
     }
-    ps->cfg.ems = I("EMS", 1) != 0;
+    // EMS= を書いていなければ、ゲームの CONFIG.SYS が EMS を使わない設定（/NOEMS）のとき EMS を出さない
+    if (G("EMS", "").empty() && config_sys_noems(root)) {
+        ps->cfg.ems = false;
+        ps->cfg.ems_from_config = true;
+    } else ps->cfg.ems = I("EMS", 1) != 0;
     ps->cfg.ems_kb = I("EMSKB", 4096);
     if (ps->cfg.ems_kb < 16) ps->cfg.ems = false;
     if (ps->cfg.ems_kb > 32768) ps->cfg.ems_kb = 32768;
@@ -467,6 +501,7 @@ void Player::midi_feed(uint8_t b) {
 }
 
 static const float k_opna_makeup = 4.0f;   // +12dB
+static const float k_avs_makeup = 4.0f;    // +12dB（内蔵の AVSDRV の PCM）
 
 // 調べもの（Trace=1）: MS-DOS を 10 秒呼ばずに動き続けたら、止まっている場所の見当を記録に書く
 uint32_t g_int21_count = 0;
@@ -522,6 +557,10 @@ void Player::run_frame(bool render_video, bool render_audio) {
     size_t wi = 0, bi = 0, pi = 0;
     float vol = ps.volume / 100.0f;
     float pvol = ps.pcm_volume / 100.0f * (m->pcm86.vol / 15.0f) * 0.6f / 32768.0f;
+    // 内蔵の AVSDRV で鳴らすゲームは、BGM・声・効果音をゲームが自分で混ぜてから渡してくる。
+    // 混ぜるときに曲ごとの音量（多くは 1/4 前後）を掛けるので、そのままではほかのゲームの PCM より
+    // ずっと小さい（BGM の山が -18dBFS ほど）。FM 音源と同じく +12dB 持ち上げる（大きな山は下のソフトリミッタで丸める）
+    if (m->avs.on) pvol *= k_avs_makeup;
     float bvol = ps.beep_volume / 100.0f * 0.15f;
     {   // PCM86 のローパスの係数（標本化周波数が変わったときだけ作り直す）
         static const uint32_t rates[8] = {44100, 33075, 22050, 16538, 11025, 8269, 5513, 4134};

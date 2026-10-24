@@ -389,6 +389,7 @@ Start=A:\AUTOEXEC.BAT</pre>
   <tr><td><code>Volume=</code></td><td>100</td><td>全体の音量（%、0〜1000）。100 を超えて上げると、大きな山は自動で丸めて音割れを抑えます。</td></tr>
   <tr><td><code>FMVolume=</code> / <code>SSGVolume=</code></td><td>100</td><td>FM 音源・SSG の音量（%）。</td></tr>
   <tr><td><code>PCMVolume=</code></td><td>100</td><td>86 ボードの PCM の音量（%）。</td></tr>
+  <tr><td><code>AVSDRV=</code></td><td>（自動）</td><td>PC-9821 の PCM ドライバ <code>AVSDRV.SYS</code> の代わり（INT D9h と装置 <code>AVSDRV$$</code>）を用意するか。書かなければ、ゲームの CONFIG.SYS に <code>DEVICE=AVSDRV.SYS</code> があるときだけ用意します。1: いつも用意する。0: 用意しない（CONFIG.SYS の本物の <code>AVSDRV.SYS</code> があれば、それを組み込む）。音は 86 ボードの PCM から、ほかのゲームの PCM と同じくらいの大きさになるよう +12dB 持ち上げて出します（<a href="#memory">1-10</a>）。</td></tr>
   <tr><td><code>BeepVolume=</code></td><td>50</td><td>ビープ音の音量（%）。</td></tr>
   <tr><td><code>RhythmROM=</code></td><td>なし（自動）</td><td>リズム音源の本物。空か <code>1</code> なら、ゲームのフォルダ → PC98PLAYER.EXE のフォルダの順に、ROM（<code>ym2608_adpcm_rom.bin</code>、8192 バイト）か WAV の組（<code>2608_BD.WAV</code>・<code>2608_SD.WAV</code>・<code>2608_TOP.WAV</code>・<code>2608_HH.WAV</code>・<code>2608_TOM.WAV</code>・<code>2608_RIM.WAV</code>。リムは <code>2608_RYM.WAV</code> でも可）を探します。ファイル名を書くとそれを使います（WAV はどれか 1 つを書けば、同じフォルダの 6 つを読みます）。<code>0</code> は内蔵の合成音。見つからなければ内蔵の合成音で鳴ります。詳しくは <a href="#rhythm">1-12</a>。</td></tr>
   <tr><td><code>SampleRate=</code></td><td>44100</td><td>出力のサンプリング周波数。</td></tr>
@@ -403,7 +404,7 @@ Start=A:\AUTOEXEC.BAT</pre>
 <div class="tablewrap">
 <table>
   <tr><th>項目</th><th>既定値</th><th>説明</th></tr>
-  <tr><td><code>EMS=</code></td><td>1</td><td>1: EMS（EMM386 相当）を用意する。</td></tr>
+  <tr><td><code>EMS=</code></td><td>1</td><td>1: EMS（EMM386 相当）を用意する。書かないときは、ゲームのフォルダの CONFIG.SYS で EMM386 などに <code>NOEMS</code> が付いていれば EMS を出しません（EMS が無い前提のゲーム向け）。<code>EMS=1</code> と書けば、いつでも出します。</td></tr>
   <tr><td><code>LoadDevices=</code></td><td>1</td><td>1: 起動ドライブの CONFIG.SYS の <code>DEVICE=</code> のドライバ（MIDI・音楽のドライバなど）を組み込む。0: 組み込まない（<a href="#memory">1-10</a>）。</td></tr>
   <tr><td><code>EMSKB=</code></td><td>4096</td><td>EMS の容量（KB）。</td></tr>
   <tr><td><code>XMS=</code></td><td>1</td><td>1: XMS（HIMEM.SYS 相当）を用意する。</td></tr>
@@ -458,6 +459,7 @@ ExitOnEnd=0</pre>
   <li>文字装置のドライバだけを組み込みます（RAM ディスクなどのブロック装置は組み込みません）。<code>DEVICEHIGH=</code> も通常のメモリに読みます。</li>
   <li>組み込んだドライバは、装置の鎖（INT 21h AH=52h）からたどれ、名前で開くこともできます。ただし、開いた装置への読み書き・IOCTL はドライバには渡しません。</li>
   <li>MIDI のドライバ（MPU-401 用）は、<code>MIDI=1</code>（既定）で MIDI の音を出します。</li>
+  <li>PC-9821 の PCM ドライバ <code>AVSDRV.SYS</code>（MS-DOS に付いているもので、ゲームのディスクには入っていないことが多い）は、PC98PLAYER が代わりのものを持っています。CONFIG.SYS に <code>DEVICE=AVSDRV.SYS</code> があれば、ファイルが無くても組み込んだことになり、「PCM ドライバが組み込まれていません」と言われずに済みます。CONFIG.SYS が無いゲームのフォルダでは、INI に <code>AVSDRV=1</code> と書きます。</li>
 </ul>
 <ul>
   <li>通常メモリの空きは、起動した直後でおよそ 627KB です。</li>
@@ -610,6 +612,7 @@ CDROM=GAME.ISO</pre>
 
 <h3>手順（インストーラを使わない場合）</h3>
 <p>インストーラが何をコピーするかが分かっていれば、自分でコピーしてもかまいません。CD の中のファイルの一覧（<code>INSTALL.INF</code> などの説明ファイル）を見て、ハードディスクへコピーするファイルだけをゲームのフォルダに置き、<code>Start=</code> にゲームの実行ファイルを書き、<code>CDROM=</code> も書きます。</p>
+<div class="note">CD の中身をコピーしたフォルダを <code>CDROM=</code> に書いたときも、PC98PLAYER がフォルダの中身を CD と同じ並び（ISO 9660）に組み立てるので、ファイルの名前ではなく CD のセクタの番号で読むゲーム（MSCDEX の絶対セクタの読み出しや、ディレクトリ項目の問い合わせを使うもの）も動きます。セクタの位置は元の CD と同じにはならないので、セクタの番号をデータの中に持っているゲームは、CUE シートか ISO で入れてください。</div>
 <div class="note">CD-ROM 版のゲームの多くは、起動したときに MSCDEX に問い合わせて CD-ROM ドライブを探し、そこからデータを読みます。<strong>CD の中身を全部ゲームのフォルダにコピーしても、<code>CDROM=</code> が無いと「データディスクをセットしてください」などと言われて先へ進めないことがあります。</strong>CD のイメージは、<code>CDROM=</code> で入れておいてください。</div>
 
 <h3 id="cdda">CD-DA（CD の音楽トラック）</h3>
@@ -629,6 +632,7 @@ CDDA=BGM</pre>
   <li><strong>ファイル名の最後の 2 桁の数が、トラック番号です。</strong>前の部分は何でもかまいません。<br>
       例: <code>track_02.mp3</code> → トラック 2、<code>cdaudio_19.mp3</code> → トラック 19、<code>Game BGM-05.flac</code> → トラック 5</li>
   <li>ゲームの CD では、トラック 1 はデータトラックなので、02 から始まります（01 のファイルは使いません）。音楽 CD のときは、下の「音楽 CD を入れる」を見てください。番号が飛んでいるときは、その番号に短い無音のトラックを置いて、番号がずれないようにします。</li>
+  <li>トラックは、データトラックの後に 2 秒のすき間を置き、音楽トラックどうしはすき間なしで並べます。CUE から INDEX 01 ごとに切り出したファイル（<code>cue2folder.py</code> で作ったものなど）なら、元の CD と同じ位置になります。</li>
   <li>CUE + BIN（IMG）の CD イメージからは、ソース（<code>_src.zip</code>）の <code>tools\cue2folder.py</code> で、データトラックの ISO（<code>TRACK01.ISO</code>）と音楽トラックのファイル（<code>BGM\track02.mp3</code> …）に分けられます（Python が要ります。MP3 にするには <code>--mp3</code> を付け、ffmpeg も要ります）。<code>python cue2folder.py GAME.CUE 出力 --mp3</code> のように使い、INI には <code>CDROM=TRACK01.ISO</code> と <code>CDDA=BGM</code> を書きます。CD イメージより、ずっと小さくなります。</li>
   <li>WAV（8・16・24 ビット）・MP3・FLAC を読みます。周波数（44.1kHz 以外）やモノラルでもかまいません。</li>
   <li>CUE シートと一緒に書くと、同じ番号のトラックの音だけをフォルダのファイルに置き換えます（トラックの位置は CUE のまま）。</li>

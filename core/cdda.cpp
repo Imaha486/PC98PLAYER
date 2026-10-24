@@ -333,6 +333,10 @@ void set_data_only(uint32_t sectors) {
 
 bool is_audio_file(const std::string& name) { int s = src_of_ext(name); return s == SRC_WAV || s == SRC_MP3 || s == SRC_FLAC; }
 
+// 次のトラックとの間のすき間。データトラックの後は 2 秒（150 セクタ、実機の CD と同じ）。
+// 音楽トラックどうしの間は 0（曲と曲の間の無音は、CUE から切り出したファイルの中に入っている）
+static uint32_t gap_after_last() { return (!s_tracks.empty() && !s_tracks.back().audio) ? 150 : 0; }
+
 int add_folder(const std::string& dir, std::string* info) {
     std::vector<HostDirEntry> l;
     if (!hostfs::list_dir(dir, l)) { if (info) *info = "フォルダを開けません"; return 0; }
@@ -368,11 +372,11 @@ int add_folder(const std::string& dir, std::string* info) {
         } else {
             // 足りない番号は短い無音のトラックで埋めて、番号を飛ばさない
             while ((s_tracks.empty() ? 0 : last_track()) + 1 < f.no) {
-                Track g; g.no = s_tracks.empty() ? 1 : last_track() + 1; g.audio = true; g.start = s_tracks.empty() ? 0 : leadout() + 150; g.length = 300;
+                Track g; g.no = s_tracks.empty() ? 1 : last_track() + 1; g.audio = true; g.start = s_tracks.empty() ? 0 : leadout() + gap_after_last(); g.length = 300;
                 s_tracks.push_back(g);
             }
             // 音楽 CD（データトラックが無い）なら、最初のトラックは 0（Red Book 00:02:00）から
-            Track a; a.no = f.no; a.audio = true; a.start = s_tracks.empty() ? 0 : leadout() + 150; a.length = secs;
+            Track a; a.no = f.no; a.audio = true; a.start = s_tracks.empty() ? 0 : leadout() + gap_after_last(); a.length = secs;
             a.src = f.src; a.path = f.path;
             s_tracks.push_back(a);
         }

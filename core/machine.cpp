@@ -563,6 +563,7 @@ uint8_t mem_rb_slow(Machine* m, uint32_t a) {
     return 0xFF;
 }
 uint32_t g_watch_lo = 0, g_watch_hi = 0;
+void watch_hit(Machine* m, uint32_t a, uint32_t v, int w) { if (a < 0xA0000) fprintf(stderr, "[wf f%llu] %05X <- %0*X @%04X:%04X\n", (unsigned long long)m->frame_count, a, w * 2, v, m->cpu.op_cs, m->cpu.op_ip); }
 void mem_wb_slow(Machine* m, uint32_t a, uint8_t v) {
     if (a >= g_watch_lo && a < g_watch_hi) plog("[w] %05X <- %02X grcg=%02X tile=%02X,%02X,%02X,%02X @%04X:%04X\n", a, v, m->grcg_mode, m->grcg_tile[0], m->grcg_tile[1], m->grcg_tile[2], m->grcg_tile[3], m->cpu.op_cs, m->cpu.op_ip);
     if (a < 0xA4000) {
@@ -842,7 +843,7 @@ void hle_trap(Machine* m, uint8_t n) {
     switch (n) {
     case HLE_INT20: case HLE_INT21: case HLE_INT25: case HLE_INT26: case HLE_INT27:
     case HLE_INT28: case HLE_INT29: case HLE_INT2F: case HLE_INT67: case HLE_XMS:
-    case HLE_SHELL: case HLE_EXIT: case HLE_DEVINIT:
+    case HLE_SHELL: case HLE_EXIT: case HLE_DEVINIT: case HLE_CDSTRAT: case HLE_CDINTR:
         dos_hle(m, n); break;
     default:
         bios_hle(m, n); break;
@@ -900,6 +901,7 @@ static void advance(Machine* m, uint32_t t) {
     }
 
     // PCM86
+    if (m->avs.playing) avsdrv_advance(m, t);
     if (m->pcm86.ctrl & 0x80) pcm86_advance(m, t);
     // MIDI（MPU のクロック・トゥ・ホスト）
     if (m->mpu.cth_on) mpu_advance(m, t);
@@ -1029,6 +1031,7 @@ Machine* machine_create(const Config& cfg) {
     }
     egc_reset(m);
     pcm86_reset(m);
+    avsdrv_reset(m);
     mpu_defaults(m->mpu);
     fontrom_reset_gaiji();
     bios_init(m);
@@ -1103,6 +1106,7 @@ void machine_state_save(Machine* m, StateW& w) {
     pcm86_state_save(m, w);
     w.tag("MDRV"); w.pod(m->mdrv);
     w.tag("GCLK"); w.pod(m->gdc_clk5);
+    w.tag("AVSD"); w.pod(m->avs);
 }
 
 void machine_state_load(Machine* m, StateR& r) {
@@ -1167,6 +1171,7 @@ void machine_state_load(Machine* m, StateR& r) {
     pcm86_state_load(m, r);
     if (r.peek_tag("MDRV")) { r.tag("MDRV"); uint16_t so = m->mdrv.stub_off, po = m->mdrv.ptr_off; r.pod(m->mdrv); m->mdrv.stub_off = so; m->mdrv.ptr_off = po; }
     if (r.peek_tag("GCLK")) { r.tag("GCLK"); r.pod(m->gdc_clk5); } else m->gdc_clk5 = 0;
+    if (r.peek_tag("AVSD")) { r.tag("AVSD"); r.pod(m->avs); } else { uint8_t on = m->avs.on; avsdrv_reset(m); m->avs.on = on; }
     // 派生状態の作り直し
     g_addr_mask = m->a20 ? A20_ON_MASK : 0xFFFFF;
     m->regw.clear(); m->beepw.clear();

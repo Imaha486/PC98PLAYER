@@ -723,6 +723,7 @@ void bios_hle(Machine* m, uint8_t n) {
         pic_update_hint(m);
         return; }
     case HLE_INT1A: SETAH(m, 0x00); return;
+    case HLE_AVSDRV: avsdrv_hle(m); return;
     case HLE_INT1B:
         if (floppy::is_fd_da(AL(m))) { floppy::bios_int1b(m); return; }
         {

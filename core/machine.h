@@ -100,6 +100,18 @@ struct Pcm86 {
 };
 struct PcmSample { uint64_t tick; int16_t l, r; };
 
+// 内蔵の AVSDRV.SYS（avsdrv.cpp）。ゲームが渡すバッファの記述子を順に鳴らす
+struct AvsDrv {
+    uint8_t  on;              // INT D9h と装置 AVSDRV$$ を用意した
+    uint8_t  playing;
+    uint8_t  qn;              // 待ち行列の長さ（[0] が鳴っているもの）
+    uint16_t q_seg[8], q_off[8];
+    uint32_t q_start[8];      // その記述子の最初のバイトが、通しで何バイト目か
+    uint32_t fed;             // FIFO へ送った通しのバイト数（ゲームのバッファの中のバイト）
+    uint8_t  ratio;           // FIFO の 1 バイトに対するバッファのバイト（モノラルを左右に分けるので 1/2）
+    uint16_t dev_seg;         // 装置ヘッダの場所（ROM）
+};
+
 // MPU-PC98II（MPU-401 互換）。UART モードと、インテリジェントモードのうち
 // 「MIDI データの直接送信（D0h-DFh）」とバージョン問い合わせだけを扱う
 struct Mpu {
@@ -148,6 +160,7 @@ struct Config {
     char     cd_drive = 'Q';         // CD-ROM のドライブ名（MSCDEX の既定と同じ Q:）
     std::string cd_device = "MSCD001"; // CD-ROM の装置名（MSCDEX の /D: と同じ。ゲームが開いて確かめる）
     std::string cdda_dir;            // CD-DA の音のフォルダ（ホストのパス。空なら無し）
+    int      avsdrv = -1;            // 内蔵の AVSDRV.SYS（PCM ドライバ、INT D9h）。-1: CONFIG.SYS に書いてあれば / 0: 使わない / 1: 使う（AVSDRV=）
     bool     load_devices = true;    // 起動ドライブの CONFIG.SYS の DEVICE= のドライバを組み込む（LoadDevices=）
     int      cd_type = 0;            // CD の種類（CDType=）: 0 = 自動、1 = データの CD、2 = 音楽 CD（データトラックなし）
     char     current_drive = 0;      // 起動時のカレントドライブ（0 = Start= のドライブ、無ければゲームのドライブ）
@@ -174,6 +187,7 @@ struct PcmSample { uint64_t tick; int16_t l, r; };
     int      midi_speed = 100;       // MIDI の演奏速度の補正（%）。MPU のクロックだけを速める
     bool     ems = true;             // EMM386 相当（LIM EMS 4.0、ページフレーム D000h）
     int      ems_kb = 4096;
+    bool     ems_from_config = false;  // CONFIG.SYS の /NOEMS を見て EMS を出さないことにした
     int      xms_kb = 8192;          // HIMEM.SYS 相当（XMS 3.0）。0 で無し
     int      ext_kb = 8192;          // 拡張メモリ（1MB より上の RAM。BIOS の 0401h に見せ、自前で保護モードに入るソフトが使う）。0 で無し
 };
@@ -229,6 +243,7 @@ struct Machine {
     Mouse    mouse;
     uint8_t  joy = 0;           // ジョイスティック（ホストが毎フレーム設定。1=押している: bit0 上 1 下 2 左 3 右 4 A 5 B）
     MouseDrv mdrv;
+    AvsDrv   avs;
     Config   cfg;
 
     // 画面
@@ -352,6 +367,13 @@ uint8_t pcm86_in(Machine* m, uint16_t port);
 void    pcm86_out(Machine* m, uint16_t port, uint8_t v);
 void    pcm86_reset(Machine* m);
 
+// avsdrv.cpp
+void avsdrv_install(Machine* m);          // INT D9h と装置 AVSDRV$$ を用意する（DOS の初期化のあと）
+void avsdrv_hle(Machine* m);              // INT D9h
+void avsdrv_advance(Machine* m, uint32_t t);
+void avsdrv_reset(Machine* m);
+uint32_t dos_nul_addr();                  // dos.cpp: 装置 NUL の見出しの番地
+
 // xmsems.cpp
 void xmsems_init(Machine* m);
 void xmsems_hle(Machine* m, uint8_t n);
@@ -400,11 +422,14 @@ enum {
     HLE_INT33      = 0x33,
     HLE_SNDBIOS    = 0xD2,   // サウンド BIOS（INT D2h）
     HLE_INTDC      = 0xDC,
+    HLE_AVSDRV     = 0xD9,   // 内蔵の AVSDRV.SYS（INT D9h）
     HLE_INT67      = 0x67,
     HLE_LIO        = 0xA0,   // 0xA0-0xAF: グラフィック LIO（INT A0h-AFh）
     HLE_XMS        = 0xE0,
     HLE_MSIRQ      = 0xF0,   // マウスドライバの IRQ13: ユーザのイベントハンドラを呼ぶか決める
     HLE_MSIRQ_END  = 0xF1,   // ハンドラから戻った
+    HLE_CDSTRAT    = 0xF4,   // CD-ROM の装置の戦略ルーチン（直接呼ばれたとき）
+    HLE_CDINTR     = 0xF5,   // 同じく割込みルーチン
     HLE_DEVINIT    = 0xFC,   // CONFIG.SYS のドライバの戦略・割込みルーチンから戻った
     HLE_SHELL      = 0xFD,   // シェル（バッチ）の次の行へ
     HLE_EXIT       = 0xFE,
