@@ -89,7 +89,7 @@ struct RegWrite { uint64_t tick; uint8_t part, addr, val; };
 // PC-9801-86 の PCM（pcm86.cpp）
 struct Pcm86 {
     uint8_t  ctrl;          // A468h（bit4 の割込みフラグは irqflag に分けて持つ）
-    uint8_t  dactrl;        // A46Ah（ctrl bit5=0 のとき）
+    uint8_t  dac_mode;        // A46Ah（ctrl bit5=0 のとき）
     uint8_t  vol;           // A466h の音量（0..15）
     uint8_t  irqflag;
     uint16_t thresh;        // 割込みを起こす FIFO 残量
@@ -99,6 +99,30 @@ struct Pcm86 {
     uint8_t  fifo[0x8000];
 };
 struct PcmSample { uint64_t tick; int16_t l, r; };
+
+// PC-9821 の 256 色（PEGC、pegc.cpp）
+struct Pegc {
+    uint8_t  on;              // 256 色モード（6Ah に 21h）
+    uint8_t  single;          // 1 画面モード（6Ah に 69h）: 512KB を続けて 1 枚として使う
+    uint8_t  crt31;           // 09A8h: 1 = 31kHz（480 ライン）
+    uint8_t  palidx;
+    uint8_t  pal[256][3];     // G, R, B（8 ビット）
+    uint8_t  mmio[0x200];      // E0000h-E01FFh の内容（E0004h・E0006h はバンク、E0100h は描き方 など）
+};
+
+// 内蔵の AVGDRV.SYS（avgdrv.cpp）。PC-9821 の 256 色のグラフィックドライバ（INT D8h）
+// AVSDRV.SYS の INT DAh（FM 音源の曲の演奏）の覚え書き
+struct AvsFm {
+    uint8_t  playing;
+    uint8_t  pad;
+    uint16_t work_seg;        // AH=03h で渡された、パートごとの作業領域
+};
+
+struct AvgDrv {
+    uint8_t  on;
+    uint8_t  pad[7];
+    uint32_t regs[16];        // 機能ごとの覚え書き（avgdrv.cpp）
+};
 
 // 内蔵の AVSDRV.SYS（avsdrv.cpp）。ゲームが渡すバッファの記述子を順に鳴らす
 struct AvsDrv {
@@ -171,7 +195,7 @@ struct Config {
     int      midi = 0;               // PC-9801-86 の PCM（pcm86.cpp）
 struct Pcm86 {
     uint8_t  ctrl;          // A468h（bit4 の割込みフラグは irqflag に分けて持つ）
-    uint8_t  dactrl;        // A46Ah（ctrl bit5=0 のとき）
+    uint8_t  dac_mode;        // A46Ah（ctrl bit5=0 のとき）
     uint8_t  vol;           // A466h の音量（0..15）
     uint8_t  irqflag;
     uint16_t thresh;        // 割込みを起こす FIFO 残量
@@ -187,6 +211,7 @@ struct PcmSample { uint64_t tick; int16_t l, r; };
     int      midi_speed = 100;       // MIDI の演奏速度の補正（%）。MPU のクロックだけを速める
     bool     ems = true;             // EMM386 相当（LIM EMS 4.0、ページフレーム D000h）
     int      ems_kb = 4096;
+    int      ems_frame = 0xD000;     // ページフレームのセグメント（EMSFrame=、C000h か D000h）
     bool     ems_from_config = false;  // CONFIG.SYS の /NOEMS を見て EMS を出さないことにした
     int      xms_kb = 8192;          // HIMEM.SYS 相当（XMS 3.0）。0 で無し
     int      ext_kb = 8192;          // 拡張メモリ（1MB より上の RAM。BIOS の 0401h に見せ、自前で保護モードに入るソフトが使う）。0 で無し
@@ -244,13 +269,17 @@ struct Machine {
     uint8_t  joy = 0;           // ジョイスティック（ホストが毎フレーム設定。1=押している: bit0 上 1 下 2 左 3 右 4 A 5 B）
     MouseDrv mdrv;
     AvsDrv   avs;
+    AvgDrv   avg;
+    AvsFm    avsfm;
+    Pegc     pegc;
+    std::vector<uint8_t> pegc_vram;  // 256 色の VRAM（512KB）
     Config   cfg;
 
     // 画面
     uint8_t  analog;            // 16 色モード
     uint8_t  pal[16][3];        // G,R,B（4bit）
     uint8_t  palidx;
-    uint8_t  degpal[4];
+    uint8_t  dig_pal[4];
     uint8_t  disp_bank, draw_bank;
     uint8_t  modeff[8];         // 68h
     uint8_t  modeff2[8];        // 6Ah の各 bit
@@ -328,7 +357,7 @@ struct FontSource {
     void* user;
 };
 void video_set_font(const FontSource& fs);
-void video_render(Machine* m, uint32_t* out /* 640x400 ARGB */);
+int  video_render(Machine* m, uint32_t* out /* 640x480 ARGB の領域。描いた行数（400 / 480）を返す */);
 const uint8_t* font_get_kanji(uint16_t jis);   // 32 バイト
 const uint8_t* font_get_ank(uint8_t c);        // 16 バイト
 uint16_t sjis_to_jis(uint16_t sj);
@@ -367,7 +396,24 @@ uint8_t pcm86_in(Machine* m, uint16_t port);
 void    pcm86_out(Machine* m, uint16_t port, uint8_t v);
 void    pcm86_reset(Machine* m);
 
+// pegc.cpp
+void    pegc_clear(Machine* m);
+bool    pegc_io_out(Machine* m, uint16_t port, uint8_t v);   // 扱ったら true
+bool    pegc_io_in(Machine* m, uint16_t port, uint8_t* v);
+bool    pegc_mem_rb(Machine* m, uint32_t a, uint8_t* v);     // 256 色モードの A8000h-BFFFFh・E0000h-E7FFFh
+bool    pegc_mem_wb(Machine* m, uint32_t a, uint8_t v);
+int     pegc_render(Machine* m, uint32_t* out);              // 描いた行数（400 / 480）。256 色でなければ 0
+
+// scsicd.cpp（SCSI の CD-ROM ドライブ）
+void scsicd_setup(Machine* m);
+bool scsicd_int1b(Machine* m);
+
+// avgdrv.cpp
+void avgdrv_install(Machine* m);
+void avgdrv_hle(Machine* m);
+
 // avsdrv.cpp
+void avsfm_hle(Machine* m);
 void avsdrv_install(Machine* m);          // INT D9h と装置 AVSDRV$$ を用意する（DOS の初期化のあと）
 void avsdrv_hle(Machine* m);              // INT D9h
 void avsdrv_advance(Machine* m, uint32_t t);
@@ -379,6 +425,8 @@ void xmsems_init(Machine* m);
 void xmsems_hle(Machine* m, uint8_t n);
 bool xms_int2f(Machine* m);
 bool ems_enabled(Machine* m);
+bool ems_upper_mapped(uint32_t a);
+bool ems_frame_hit(uint32_t a);
 
 // dos.cpp
 void dos_init(Machine* m);
@@ -423,6 +471,8 @@ enum {
     HLE_SNDBIOS    = 0xD2,   // サウンド BIOS（INT D2h）
     HLE_INTDC      = 0xDC,
     HLE_AVSDRV     = 0xD9,   // 内蔵の AVSDRV.SYS（INT D9h）
+    HLE_AVGDRV     = 0xD8,   // 内蔵の AVGDRV.SYS（INT D8h）
+    HLE_AVSFM      = 0xDA,   // 内蔵の AVSDRV.SYS の FM 音源（INT DAh）
     HLE_INT67      = 0x67,
     HLE_LIO        = 0xA0,   // 0xA0-0xAF: グラフィック LIO（INT A0h-AFh）
     HLE_XMS        = 0xE0,

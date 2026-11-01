@@ -65,8 +65,11 @@
     <ClCompile Include="core\opna_renderer.cpp" />
     <ClCompile Include="core\rhythm_rom.cpp" />
     <ClCompile Include="core\xmsems.cpp" />
+    <ClCompile Include="core\pegc.cpp" />
+    <ClCompile Include="core\avgdrv.cpp" />
     <ClCompile Include="core\pcm86.cpp" />
     <ClCompile Include="core\lio.cpp" />
+    <ClCompile Include="core\scsicd.cpp" />
     <ClCompile Include="core\soundbios.cpp" />
     <ClCompile Include="core\floppy.cpp" />
     <ClCompile Include="core\fdflux.cpp" />

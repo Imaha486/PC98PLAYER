@@ -484,7 +484,7 @@ static void int18(Machine* m) {
         return; }
     case 0x43: {   // パレット（デジタル）
         uint32_t a = lin(m->cpu.sr[DS_], BX(m));
-        for (int i = 0; i < 4; i++) m->degpal[i] = mem_rb(m, a + i);
+        for (int i = 0; i < 4; i++) m->dig_pal[i] = mem_rb(m, a + i);
         return; }
     case 0x44: m->border = (uint8_t)(CX(m) >> 8); return;
     default:
@@ -724,8 +724,11 @@ void bios_hle(Machine* m, uint8_t n) {
         return; }
     case HLE_INT1A: SETAH(m, 0x00); return;
     case HLE_AVSDRV: avsdrv_hle(m); return;
+    case HLE_AVSFM: avsfm_hle(m); return;
+    case HLE_AVGDRV: avgdrv_hle(m); return;
     case HLE_INT1B:
         if (floppy::is_fd_da(AL(m))) { floppy::bios_int1b(m); return; }
+        if (scsicd_int1b(m)) return;   // SCSI の CD-ROM ドライブ
         {
             // ハードディスク（SASI/IDE, DA 80h・00h のユニット 0 = ゲームのフォルダ）: 「付いている」ことだけ答える。
             // インストーラがハードディスクの有無を SENSE（AH=x4h）で調べるため（下級生など）。

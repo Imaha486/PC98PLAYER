@@ -49,7 +49,8 @@ struct Player {
     PlayerSettings ps;
     Machine* m = nullptr;
     OpnaRenderer* opna = nullptr;
-    uint32_t fb[640 * 400];
+    uint32_t fb[640 * 480];         // 画面（640 ドット幅。行数は fb_h）
+    int      fb_h = 400;            // 今の画面の行数（PC-9821 の 640x480 なら 480）
     std::vector<int16_t> audio;     // 直近フレームぶん（ステレオ交互）
     double sample_acc = 0;
     double beep_phase = 0;

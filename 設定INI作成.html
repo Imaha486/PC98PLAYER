@@ -140,6 +140,7 @@ const SCHEMA = [
     { key: "EMS", label: "EMS", type: "check", def: "1", on: "1", off: "0", text: "EMS（EMM386 相当）を用意する", help: "INI に EMS= を書かないときは、ゲームのフォルダの CONFIG.SYS の EMM386 に NOEMS があれば EMS を出しません。「すべての項目を書く」で EMS=1 を書くと、CONFIG.SYS にかかわらず EMS を出します。" },
     { key: "LoadDevices", label: "CONFIG.SYS のドライバ", type: "check", def: "1", on: "1", off: "0", text: "CONFIG.SYS の DEVICE= のドライバを組み込む", help: "ゲームのフォルダの CONFIG.SYS に書かれた MIDI や音楽のドライバなどを、ゲームより先に組み込みます。メモリ・CD-ROM・マウス・日本語入力のドライバは組み込みません。" },
     { key: "EMSKB", label: "EMS の容量", type: "number", def: "4096", min: 0, max: 32768, unit: "KB" },
+    { key: "EMSFrame", label: "EMS のページフレーム", type: "select", def: "D000", options: [["D000","D000h"],["C000","C000h"]], help: "「EMS ドライバの設定が不正です」と出る PC-9821 用のソフトでは C000h にします。" },
     { key: "XMS", label: "XMS", type: "check", def: "1", on: "1", off: "0", text: "XMS（HIMEM.SYS 相当）を用意する" },
     { key: "XMSKB", label: "XMS の容量", type: "number", def: "8192", min: 0, max: 65536, unit: "KB" },
     { key: "ExtMemMB", label: "拡張メモリ", type: "number", def: "8", min: 0, max: 14, unit: "MB", help: "1MB より上の RAM。EMS/XMS を通さず、自分で保護モードに切り替えて使うゲーム向けです（「プロテクトメモリが確保出来ません」と出るとき）。0 で無し。" },

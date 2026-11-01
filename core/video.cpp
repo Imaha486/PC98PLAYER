@@ -13,7 +13,12 @@ static inline uint32_t rgb4(uint8_t g, uint8_t r, uint8_t b) {
 
 static const uint8_t s_blank16[16] = {0};
 
-void video_render(Machine* m, uint32_t* out) {
+int video_render(Machine* m, uint32_t* out) {
+    // PC-9821 の 256 色: グラフィックはそちらで描き、テキストだけ重ねる
+    int H = pegc_render(m, out);
+    if (H) goto text;
+    H = 400;
+    {
     // パレット
     uint32_t pal[16];
     if (m->analog) {
@@ -21,7 +26,7 @@ void video_render(Machine* m, uint32_t* out) {
     } else {
         static const int lo_idx[4] = {3, 1, 2, 0}, hi_idx[4] = {7, 5, 6, 4};
         uint8_t dp[8];
-        for (int k = 0; k < 4; k++) { dp[lo_idx[k]] = (m->degpal[k] >> 4) & 7; dp[hi_idx[k]] = m->degpal[k] & 7; }   // 上位 4bit が #0-3、下位が #4-7
+        for (int k = 0; k < 4; k++) { dp[lo_idx[k]] = (m->dig_pal[k] >> 4) & 7; dp[hi_idx[k]] = m->dig_pal[k] & 7; }   // 上位 4bit が #0-3、下位が #4-7
         for (int i = 0; i < 16; i++) {
             uint8_t v = dp[i & 7];
             pal[i] = rgb4((v & 4) ? 15 : 0, (v & 2) ? 15 : 0, (v & 1) ? 15 : 0);
@@ -63,11 +68,13 @@ void video_render(Machine* m, uint32_t* out) {
         }
     }
 
+    }
+text:
     // テキスト
-    if (!m->gdcm.display) return;
+    if (!m->gdcm.display) return H;
     int rowh = (m->gdcm.csrform[0] & 0x1F) + 1;
     if (rowh < 8 || rowh > 20) rowh = 16;
-    int rows = 400 / rowh;
+    int rows = H / rowh;
     bool blink_phase = (m->frame_count / 30) & 1;
     uint32_t tsad = (uint32_t)(m->gdcm.pram[0] | (m->gdcm.pram[1] << 8));
     for (int r = 0; r < rows; r++) {
@@ -122,7 +129,7 @@ void video_render(Machine* m, uint32_t* out) {
             if (!visible && !rev) continue;
             uint32_t col = 0xFF000000u | ((at & 0x40) ? 0xFF0000u : 0) | ((at & 0x80) ? 0x00FF00u : 0) | ((at & 0x20) ? 0x0000FFu : 0);
             int y0 = r * rowh;
-            for (int y = 0; y < rowh && y0 + y < 400; y++) {
+            for (int y = 0; y < rowh && y0 + y < H; y++) {
                 uint8_t bits = 0;
                 if (visible) {
                     if (semigraph) {
@@ -148,10 +155,11 @@ void video_render(Machine* m, uint32_t* out) {
             int top = m->gdcm.csrform[1] & 0x1F, bot = (m->gdcm.csrform[2] >> 3) & 0x1F;
             if (bot >= rowh) bot = rowh - 1;
             for (int y = top; y <= bot; y++) {
-                if (r * rowh + y >= 400) break;
+                if (r * rowh + y >= H) break;
                 uint32_t* o = out + (r * rowh + y) * 640 + c * 8;
                 for (int k = 0; k < 8; k++) o[k] ^= 0x00FFFFFFu;
             }
         }
     }
+    return H;
 }
