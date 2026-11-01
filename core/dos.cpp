@@ -321,7 +321,7 @@ static bool split_guest(const std::string& in, std::vector<std::string>& comps, 
             // PC-9821 のドライバ（AVSDRV.SYS・AVGDRV.SYS）は、ゲームが装置名を開こうとしたときに内蔵のものを用意する
             //（CONFIG.SYS に書かれていなくても。AVSDRV=0 なら用意しない）
             if (b == "AVSDRV$$" && g_m->cfg.avsdrv != 0 && !g_m->avs.on) avsdrv_install(g_m);
-            if (b == "AVGDRV$$" && g_m->cfg.avsdrv != 0 && !g_m->avg.on) avgdrv_install(g_m);
+            if (b == "AVGDRV$$" && !g_m->avg.on) avgdrv_install(g_m);
             if (!*is_dev && dev_chain_has(g_m, b)) *is_dev = true;          // CONFIG.SYS で組み込んだ文字装置
         }
     }

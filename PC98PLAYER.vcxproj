@@ -54,6 +54,7 @@
   <ItemGroup>
     <ClCompile Include="core\cpu.cpp" />
     <ClCompile Include="core\avsdrv.cpp" />
+    <ClCompile Include="core\avsfm.cpp" />
     <ClCompile Include="core\machine.cpp" />
     <ClCompile Include="core\bios.cpp" />
     <ClCompile Include="core\dos.cpp" />

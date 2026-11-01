@@ -463,7 +463,7 @@ ExitOnEnd=0</pre>
   <li>組み込んだドライバは、装置の鎖（INT 21h AH=52h）からたどれ、名前で開くこともできます。ただし、開いた装置への読み書き・IOCTL はドライバには渡しません。</li>
   <li>MIDI のドライバ（MPU-401 用）は、<code>MIDI=1</code>（既定）で MIDI の音を出します。</li>
   <li>PC-9821 の PCM ドライバ <code>AVSDRV.SYS</code>（MS-DOS に付いているもので、ゲームのディスクには入っていないことが多い）は、PC98PLAYER が代わりのものを持っています。CONFIG.SYS に <code>DEVICE=AVSDRV.SYS</code> があれば、ファイルが無くても組み込んだことになり、「PCM ドライバが組み込まれていません」と言われずに済みます。CONFIG.SYS が無いゲームのフォルダでは、INI に <code>AVSDRV=1</code> と書きます。プログラムが装置 <code>AVSDRV$$</code> を開こうとしたときにも用意します（<code>AVSDRV=0</code> のときを除く）。</li>
-  <li>PC-9821 の 256 色のグラフィックドライバ <code>AVGDRV.SYS</code>（INT D8h と装置 <code>AVGDRV$$</code>）も、プログラムが <code>AVGDRV$$</code> を開こうとしたときに代わりのものを用意します。画面のモード（256 色・1 画面／2 画面）とパレットの設定に答えます。公開された資料が無いため、使うプログラムの呼び方から作っていて、そのほかの機能は何もせずに成功を返します。</li>
+  <li>PC-9821 の 256 色のグラフィックドライバ <code>AVGDRV.SYS</code>（INT D8h と装置 <code>AVGDRV$$</code>）も、プログラムが <code>AVGDRV$$</code> を開こうとしたときに代わりのものを用意します。画面のモード（256 色・1 画面／2 画面）とパレットの設定に答えます。そのほかの機能は何もせずに成功を返します。</li>
 </ul>
 <h3>PC-9821 の 256 色（PEGC）</h3>
 <ul>

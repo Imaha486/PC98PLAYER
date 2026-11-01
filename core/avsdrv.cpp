@@ -53,7 +53,7 @@ void avsdrv_install(Machine* m) {
     m->ram[0xD9 * 4 + 0] = (uint8_t)o; m->ram[0xD9 * 4 + 1] = (uint8_t)(o >> 8);
     m->ram[0xD9 * 4 + 2] = (uint8_t)ROMSEG; m->ram[0xD9 * 4 + 3] = (uint8_t)(ROMSEG >> 8);
     // INT DAh（FM 音源）
-    memset(&m->avsfm, 0, sizeof(m->avsfm));
+    avsfm_reset(m);
     o = bios_hle_stub(m, HLE_AVSFM);
     m->ram[0xDA * 4 + 0] = (uint8_t)o; m->ram[0xDA * 4 + 1] = (uint8_t)(o >> 8);
     m->ram[0xDA * 4 + 2] = (uint8_t)ROMSEG; m->ram[0xDA * 4 + 3] = (uint8_t)(ROMSEG >> 8);
@@ -205,43 +205,4 @@ void avsdrv_hle(Machine* m) {
         ok(0);
         return;
     }
-}
-
-// -----------------------------------------------------------------------------
-//  INT DAh: AVSDRV.SYS の FM 音源の機能
-//  曲のデータの形式がわからないので音は出さない。使うプログラムが待つ「演奏中」の印だけを用意する。
-//   AH=03h: ES = パートごとの作業領域（32 バイトずつ。7 番目からは +300h）で演奏を始める
-//           各パートの +13h を演奏中（1）にする（+0 が 0 のパートは使わない）
-//   AH=02h: 止める（+13h を 0 に）
-//  そのほかの機能（音色・音量・定位など）は何もせずに戻る。
-// -----------------------------------------------------------------------------
-static void fm_mark(Machine* m, uint8_t v) {
-    if (!m->avsfm.work_seg) return;
-    uint32_t base = lin(m->avsfm.work_seg, 0);
-    for (int i = 0; i < 10; i++) {
-        uint32_t e = base + (uint32_t)(i < 6 ? i * 0x20 : 0x300 + (i - 6) * 0x20);
-        if (v && !(m->ram[e] | m->ram[e + 1])) continue;
-        m->ram[(e + 0x13) & 0xFFFFF] = v;
-    }
-}
-
-void avsfm_hle(Machine* m) {
-    Cpu* c = &m->cpu;
-    uint16_t ax = (uint16_t)c->r[EAX];
-    uint8_t ah = (uint8_t)(ax >> 8);
-    static int seen[256];
-    if (m->cfg.trace && seen[ah] < 4) { seen[ah]++; plog("[avs] INT DAh AX=%04X BX=%04X CX=%04X ES=%04X\n", ax,
-        (unsigned)(uint16_t)c->r[EBX], (unsigned)(uint16_t)c->r[ECX], c->sr[ES_]); }
-    switch (ah) {
-    case 0x03:
-        m->avsfm.work_seg = c->sr[ES_];
-        m->avsfm.playing = 1;
-        fm_mark(m, 1);
-        break;
-    case 0x02:
-        fm_mark(m, 0);
-        m->avsfm.playing = 0;
-        break;
-    }
-    set_cf(m, false);
 }

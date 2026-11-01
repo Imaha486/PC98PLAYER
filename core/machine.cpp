@@ -54,8 +54,9 @@ static void civil_from_days(int z, int* y, int* m, int* d) {
     *d = doy - (153 * mp + 2) / 5 + 1; *m = mp + (mp < 10 ? 3 : -9); *y = yy + (*m <= 2);
 }
 static int s_start_days = -1;   // 起動した日（実際の日付）
+time_t g_fixed_now = 0;   // 確かめ用: 0 以外ならこの時刻に固定（harness の FIXTIME=）
 void machine_now(Machine* m, PcTime* o) {
-    time_t now = time(nullptr); struct tm lt;
+    time_t now = g_fixed_now ? g_fixed_now : time(nullptr); struct tm lt;
 #ifdef _WIN32
     localtime_s(&lt, &now);
 #else
@@ -238,8 +239,10 @@ static void opna_recalc(Machine* m) {
     if (m->opna.timer_b_period <= 0) m->opna.timer_b_period = (int32_t)(k * 16u);
 }
 unsigned g_opna_writes = 0, g_opna_keyon = 0, g_opna_hist[2][256];
+FILE* g_opna_log = nullptr;   // 確かめ用（harness の OPNALOG=）
 void opna_write(Machine* m, int part, uint8_t addr, uint8_t val) {
     g_opna_hist[part][addr]++;
+    if (g_opna_log) fprintf(g_opna_log, "%u %d %02X %02X\n", (unsigned)m->frame_count, part, addr, val);
     g_opna_writes++; if (part == 0 && addr == 0x28 && (val & 0xF0)) g_opna_keyon++;
     m->opna.reg[part][addr] = val;
     if (part == 0 && addr == 0x28) m->opna.keyon[val & 7] = (uint8_t)(val & 0xF0);
@@ -905,6 +908,7 @@ static void advance(Machine* m, uint32_t t) {
 
     // PCM86
     if (m->avs.playing) avsdrv_advance(m, t);
+    if (m->avsfm.running) avsfm_advance(m, t);
     if (m->pcm86.ctrl & 0x80) pcm86_advance(m, t);
     // MIDI（MPU のクロック・トゥ・ホスト）
     if (m->mpu.cth_on) mpu_advance(m, t);
@@ -1002,6 +1006,7 @@ Machine* machine_create(const Config& cfg) {
     memset(m->tvram, 0, sizeof(m->tvram));
     memset(m->gvram, 0, sizeof(m->gvram));
     pegc_clear(m);
+    avsfm_reset(m);
     { extern int g_idle_skip; g_idle_skip = (cfg.idle_skip && !getenv("PC98PLAYER_NOIDLE")) ? 1 : 0; }
     m->cpu_hz = (uint32_t)cfg.cpu_mhz * 1000000u;
     if (m->cpu_hz < 1000000u) m->cpu_hz = 8000000u;
@@ -1178,7 +1183,7 @@ void machine_state_load(Machine* m, StateR& r) {
     if (r.peek_tag("MDRV")) { r.tag("MDRV"); uint16_t so = m->mdrv.stub_off, po = m->mdrv.ptr_off; r.pod(m->mdrv); m->mdrv.stub_off = so; m->mdrv.ptr_off = po; }
     if (r.peek_tag("GCLK")) { r.tag("GCLK"); r.pod(m->gdc_clk5); } else m->gdc_clk5 = 0;
     if (r.peek_tag("AVSD")) { r.tag("AVSD"); r.pod(m->avs); } else { uint8_t on = m->avs.on; avsdrv_reset(m); m->avs.on = on; }
-    if (r.peek_tag("AVSF")) { r.tag("AVSF"); r.pod(m->avsfm); } else memset(&m->avsfm, 0, sizeof(m->avsfm));
+    if (r.peek_tag("AVSF")) { r.tag("AVSF"); r.pod(m->avsfm); } else avsfm_reset(m);
     if (r.peek_tag("PEGC")) { r.tag("PEGC"); r.pod(m->pegc); m->pegc_vram.resize(0x80000); r.bytes(m->pegc_vram.data(), m->pegc_vram.size()); } else pegc_clear(m);
     // 派生状態の作り直し
     g_addr_mask = m->a20 ? A20_ON_MASK : 0xFFFFF;

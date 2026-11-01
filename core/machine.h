@@ -111,11 +111,42 @@ struct Pegc {
 };
 
 // 内蔵の AVGDRV.SYS（avgdrv.cpp）。PC-9821 の 256 色のグラフィックドライバ（INT D8h）
-// AVSDRV.SYS の INT DAh（FM 音源の曲の演奏）の覚え書き
+// AVSDRV.SYS の INT DAh（FM 音源の演奏、avsfm.cpp）
+// 曲のデータはプログラムが渡す作業領域（パートごとに 32 バイト）のリングバッファにあり、
+// 作業領域のうちプログラムが見る項目（データの場所・残り・演奏中など）はそこに置き、残りはここに持つ。
+struct AvsFmPart {
+    uint8_t  key;             // 今の音の高さ（bit7: 次の同じ高さの音とつなぐ）
+    uint8_t  def_len;         // 長さを省いたときの長さ
+    uint8_t  gate;            // 音を出す割合（0-7、(gate+1)/8）
+    uint8_t  sound;           // 0: 休み 7Fh: 離した後 FFh: 鳴っている
+    uint8_t  elapsed, total, cut;   // 経過・長さ・離す時刻（拍の 1/48 単位）
+    uint8_t  mod;             // ゆらぎ（LFO）: bit7 有効、bit0-1 段階
+    uint16_t mod_t;           // ゆらぎの時刻（遅れの数え）
+    int16_t  mod_amt;         // 音程のゆらぎの深さ
+    uint16_t freq;            // 今の F-Number／周期
+};
 struct AvsFm {
-    uint8_t  playing;
-    uint8_t  pad;
-    uint16_t work_seg;        // AH=03h で渡された、パートごとの作業領域
+    uint16_t work_seg;        // 作業領域（AH=00h・03h の ES）。0 なら未初期化
+    uint8_t  ext;             // 9 音＋リズムの形（AH=03h）
+    uint8_t  running;         // テンポのタイマが動いている
+    uint8_t  paused;          // AH=19h で一時停止中
+    uint8_t  song;            // AH=04h で曲として始めた（終わったら繰り返す）
+    uint8_t  repeat;          // 残りの回数（0 = いつまでも）
+    uint8_t  sub_div, sub_left;    // テンポのタイマ何回で 1 拍の 1/48 か
+    uint8_t  rhy_wait;        // リズムは 4 刻みごと
+    uint8_t  rhy_pat;
+    uint8_t  cb_warned;
+    uint16_t rhy_pos, rhy_end;
+    uint16_t mod_clock;       // ゆらぎの共通の時計
+    uint16_t rnd;
+    uint8_t  ssg_vol[3];
+    uint8_t  mixer;
+    uint8_t  keylatch[9];     // 最後に 28h に書いた値（再開用）
+    uint8_t  pad2;
+    int32_t  a_left, a_period, b_left, b_period;
+    int16_t  mod_val[9], mod_dir[9];
+    uint8_t  voice[9][52];    // 音色（パラメータ 0-31h と 32h）
+    AvsFmPart part[10];       // 0-8 と リズム（9）
 };
 
 struct AvgDrv {
@@ -414,6 +445,8 @@ void avgdrv_hle(Machine* m);
 
 // avsdrv.cpp
 void avsfm_hle(Machine* m);
+void avsfm_reset(Machine* m);
+void avsfm_advance(Machine* m, uint32_t t);
 void avsdrv_install(Machine* m);          // INT D9h と装置 AVSDRV$$ を用意する（DOS の初期化のあと）
 void avsdrv_hle(Machine* m);              // INT D9h
 void avsdrv_advance(Machine* m, uint32_t t);
