@@ -68,7 +68,7 @@ EXE を 1 か所に置いたまま使い回す場合は、ショートカット�
 | 層 | 中身 |
 |---|---|
 | CPU | i386 リアルモードのインタプリタ（8086/V30/286 上位互換、32bit レジスタ・386 命令込み） |
-| ハードウェア | GDC（テキスト/グラフィック、200 ライン表示）、GRCG、**EGC**、16 色アナログパレット、**任意設定の256色（PEGC、640×400／640×480）**、8259、8253、キーボード、バスマウス、漢字 ROM ポート・外字、YM2608(OPNA)、**86 ボードの PCM**、**MPU-PC98II（MIDI）**・RS-232C の MIDI 出力、ROM のグラフィック LIO（INT A0h-AFh。画面設定・色・点・線・箱・塗りつぶし・PAINT（単色・タイル）・GGET/GPUT1。円・漢字の GPUT2 は未対応）、**サウンド BIOS**（INT D2h。`SoundBIOS=1`。音色は自前）、ブザーの音程の変化（BEEP 演奏）、**386 の保護モード**（GDT/LDT/IDT・32 ビットのコード。特権の検査・ページングは省略）と拡張メモリ（`ExtMemMB=`、INT 1Fh のブロック転送）、**仮想フロッピー**（D88/ベタ/FDI/NFD/SCP/HFE、実機の USB フロッピー・Greaseweazle。INT 1Bh の ID 指定読み書き・READ ID、DOS の FAT12/16 ドライブ、INT 25h/26h）、**CD-ROM**（ISO / CUE / BIN イメージかフォルダを MSCDEX 付きのドライブとして。読み出しだけ）と **CD-DA**（CUE の音楽トラック、または WAV / MP3 / FLAC のフォルダ） |
+| ハードウェア | GDC（テキスト/グラフィック、200 ライン表示）、GRCG、**EGC**、16 色アナログパレット、8259、8253、キーボード、バスマウス、漢字 ROM ポート・外字、YM2608(OPNA)、**86 ボードの PCM**、**MPU-PC98II（MIDI）**・RS-232C の MIDI 出力、ROM のグラフィック LIO（INT A0h-AFh。画面設定・色・点・線・箱・塗りつぶし・PAINT（単色・タイル）・GGET/GPUT1。円・漢字の GPUT2 は未対応）、**サウンド BIOS**（INT D2h。`SoundBIOS=1`。音色は自前）、ブザーの音程の変化（BEEP 演奏）、**386 の保護モード**（GDT/LDT/IDT・32 ビットのコード。特権の検査・ページングは省略）と拡張メモリ（`ExtMemMB=`、INT 1Fh のブロック転送）、**仮想フロッピー**（D88/ベタ/FDI/NFD/SCP/HFE、実機の USB フロッピー・Greaseweazle。INT 1Bh の ID 指定読み書き・READ ID、DOS の FAT12/16 ドライブ、INT 25h/26h）、**CD-ROM**（ISO / CUE / BIN イメージかフォルダを MSCDEX 付きのドライブとして。読み出しだけ）と **CD-DA**（CUE の音楽トラック、または WAV / MP3 / FLAC のフォルダ） |
 | BIOS | HLE: INT 18h（キー/CRT/グラフィック）、INT 1Ch（時計/インターバルタイマ）、IRQ1、INT 33h（マウスドライバ: カーソル表示・イベントハンドラ）、INT DCh |
 | DOS | HLE: INT 21h をゲームのフォルダへ直結（ファイル・FCB・MCB メモリ管理・EXEC・常駐終了・FindFirst・SFT/List of Lists など） |
 | 拡張メモリ | HLE: **HIMEM.SYS（XMS 3.0）** と **EMM386（LIM EMS 4.0、ページフレーム D000h）** |
@@ -89,7 +89,6 @@ Args=                ; 引数
 Scale=2              ; 表示倍率（1 で 640x400）
 FullScreen=0         ; 起動時に全画面
 Smooth=0             ; 拡大をなめらかに
-VideoColors=16       ; 16（既定）/ 256（PC-9821拡張グラフィック）
 CpuMHz=16            ; 仮想 CPU の速さ
 Drive=A              ; ゲームのフォルダを何ドライブに見せるか
 SoundBoard=86        ; 86 / 26 / 0（なし）
@@ -120,6 +119,7 @@ FreeSpaceMB=96       ; ゲームのドライブの空き容量として見せる
 MidiSpeedFix=100     ; MIDI の演奏速度 %（10〜1000。MPU のテンポ＝クロック・トゥ・ホストだけを速める）
 EMS=1                ; EMS（EMM386 相当）。EMSKB=4096 で容量。書かなければ CONFIG.SYS の NOEMS に従う
 EMSFrame=D000        ; EMS のページフレームのセグメント。D000 / C000（C000h を前提にする PC-9821 用のソフト向け）
+PC9821=              ; 1 で PC-9821（256 色あり）、0 で PC-9801（256 色なし）。書かなければ、ソフトが PC-9821 か調べたときに尋ねて INI に書く（VideoColors=256 も PC9821=1 と同じ）
 LoadDevices=1        ; 起動ドライブの CONFIG.SYS の DEVICE= のドライバ（MIDI・音楽のドライバなど）を組み込む（0 で組み込まない）
 AVSDRV=              ; PC-9821 の PCM ドライバ AVSDRV.SYS の代わり（INT D9h）。書かなければ CONFIG.SYS にあるときだけ。1 でいつも、0 で用意しない
 XMS=1                ; XMS（HIMEM.SYS 相当）。XMSKB=8192 で容量
@@ -269,8 +269,10 @@ PC-98 の漢字 ROM・ANK ROM を、**本物の ROM も第三者のビットマ�
 - ADPCM（86 ボード＋ちびおと、SPB 等の ADPCM RAM）
 - MPU-PC98II のインテリジェントモードの演奏機能（UART モードと、D0h 系の直接送信・問い合わせのみ対応）
 - 保護モードのうち、ページング・仮想 86 モード・タスク切り替え、VCPI/DPMI（EMM386 の下で動く DOS エクステンダ）。自分で保護モードに切り替えて拡張メモリを使うソフトは動きます（`ExtMemMB=`）
-- PEGC の高位アドレスのリニアVRAM・高度な32ビット転送
+- PEGC の 1MB より上に見せる VRAM（F00000h～）
 - N88-BASIC(86)（ROM）で動くソフト（ブートモードで ROM の BASIC を呼ぶと、その旨を表示して終了）
+
+256 色（PC-9821 の PEGC）の対応範囲と試験は [docs/256-color.md](docs/256-color.md) を参照してください。
 
 ## 配布とバージョン
 
@@ -309,7 +311,3 @@ PC98PLAYER はネット接続・他プロセスへの干渉・キー入力の記
 本体は MIT。ゲーム・ROM・フォントは一切同梱しません。FM 音源は ymfm（BSD 3-Clause, Aaron Giles）を使います。CD-DA の MP3・FLAC の展開には dr_mp3 / dr_flac（David Reid。パブリックドメイン／MIT-0。`third_party/dr_libs/` に同梱）を使います。
 他のエミュレータのソースコードは使っていません（EGC・PCM86・XMS/EMS・MPU なども独自実装）。
 `core/opna_renderer.*` と `core/rhythm_rom.*` は GMPV3 Studio Core から流用しています。
-
-### 256色グラフィック（任意設定）
-
-256色対応タイトルでは、`[PC98PLAYER]` に `VideoColors=256` を指定できます。16色を既定のまま保ち、ソフトが256色モードへ切り替えると有効になります。BIOS ROMやゲームの改変は不要です。対応範囲・検証と制限は [docs/256-color.md](docs/256-color.md) を参照してください。

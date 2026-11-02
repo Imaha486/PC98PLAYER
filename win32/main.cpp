@@ -1181,6 +1181,8 @@ static void write_template_ini(const std::wstring& path, const std::string& star
         "EMSKB=4096\r\n"
         "; EMS のページフレーム（D000 / C000。C000h を前提にする PC-9821 用のソフトでは C000）\r\n"
         "EMSFrame=D000\r\n"
+        "; 1 で PC-9821 として見せる（BIOS の 045Ch bit6 = 256 色あり）。書かなければ、ソフトが PC-9821 か調べたときに尋ねる\r\n"
+        ";PC9821=0\r\n"
         "XMS=1\r\n"
         "XMSKB=8192\r\n"
         "; 拡張メモリ（1MB より上の RAM、MB）。自分で保護モードに切り替えて使うゲーム向け（BIOS の 0401h に見せる）。0 で無し\r\n"
@@ -1562,6 +1564,23 @@ static void apply_live_settings(const PlayerSettings& o) {
 
 #include "settings.inc"
 
+// INI に PC9821= が無いのに、ソフトが PC-9821 かどうかを調べた・256 色を使おうとした。
+// その場で尋ね、答えを INI に書く（次からは尋ねない）。ソフトは「はい」の答えをそのまま読む
+static bool ask_pc9821(void*) {
+    set_capture(false);
+    int r = MessageBoxW(g_hwnd,
+        L"このソフトウェアは PC-9821 の 256 色モードに対応しているようです。\n"
+        L"PC-9821 として動かしますか？\n\n"
+        L"「はい」: PC-9821 として動かします（INI に PC9821=1 を書きます）\n"
+        L"「いいえ」: これまでどおり PC-9801 として動かします（INI に PC9821=0 を書きます）\n\n"
+        L"あとから変えるときは、INI の PC9821= を書き換えてください。",
+        L"PC98PLAYER - PC-9821 の 256 色モード", MB_YESNO | MB_ICONQUESTION);
+    bool yes = r == IDYES;
+    std::wstring err;
+    if (!g_ini_path.empty() && !settingsdlg::write_ini({{L"PC9821", yes ? L"1" : L"0"}}, &err)) show_toast(err);
+    return yes;
+}
+
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
     SetProcessDPIAware();
     timeBeginPeriod(1);
@@ -1745,6 +1764,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
     RegisterRawInputDevices(&rid, 1, sizeof(rid));
 
     g_p = new Player();
+    g_p->ask_pc9821 = ask_pc9821;
     std::string err;
     if (!g_p->init(ps, &err)) {
         MessageBoxW(nullptr, W(err).c_str(), L"PC98PLAYER", MB_ICONERROR);

@@ -67,6 +67,7 @@ int main(int argc, char** argv) {
         else if (a == "--ini") ini_path = next();
     }
     extern uint32_t g_watch_lo, g_watch_hi;
+    { extern uint32_t g_itr_at; unsigned a, b; if (getenv("ITRACE_AT") && sscanf(getenv("ITRACE_AT"), "%x:%x", &a, &b) == 2) g_itr_at = (a << 16) | b; }
     extern int g_itr_stop_cs; if (getenv("ITRACE_STOP")) g_itr_stop_cs = (int)strtol(getenv("ITRACE_STOP"), 0, 16);
     { extern int g_trace_full; if (getenv("TRACEFULL")) g_trace_full = atoi(getenv("TRACEFULL")); }
     extern int g_trace_int; if (getenv("TRACEINT")) g_trace_int = (int)strtol(getenv("TRACEINT"), 0, 16);
@@ -116,6 +117,9 @@ int main(int argc, char** argv) {
     if (getenv("NOEMS")) ps.cfg.ems = false;
     if (getenv("NOXMS")) ps.cfg.xms_kb = 0;
     p->init(ps, &err);
+    if (getenv("PC9821ASK")) {   // PC9821= が無いときの問い合わせに自動で答える（y / n）
+        p->ask_pc9821 = [](void*) -> bool { bool y = getenv("PC9821ASK")[0] == 'y'; fprintf(stderr, "[ask] PC-9821 にしますか → %s\n", y ? "はい" : "いいえ"); return y; };
+    }
     if (getenv("MIDI")) p->midi_sink = [](void*, const uint8_t* msg, int len) { fprintf(stderr, "[midi %d]", g_hframe); for (int i = 0; i < len && i < 16; i++) fprintf(stderr, " %02X", msg[i]); fprintf(stderr, "\n"); };
     std::vector<int16_t> pcm;
     clock_t c0 = clock();

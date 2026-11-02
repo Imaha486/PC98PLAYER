@@ -16,6 +16,9 @@ extern uint32_t g_addr_mask;      // A20 マスク（0xFFFFF または A20_ON_MA
 // 「外に影響する（または外から値が変わりうる）アクセス」の回数。メモリへの書き込み・I/O・HLE トラップ・
 // VRAM/ROM など RAM 以外の読み出しで増える。CPU の空回り（割込み待ちのループ）を見分けるのに使う
 extern uint32_t g_side_fx;
+// この番地を CPU が読んだら mem_probe を呼ぶ（BIOS の 045Ch: PC-9821 かどうかを調べるソフトを見つける）。使わないときは 0xFFFFFFFF
+extern uint32_t g_probe_addr;
+void     mem_probe(Machine* m, uint32_t a);
 
 uint8_t  mem_rb_slow(Machine* m, uint32_t a);
 void     mem_wb_slow(Machine* m, uint32_t a, uint8_t v);
@@ -37,7 +40,7 @@ static inline uint32_t lin_mask(uint32_t a) {
 static inline bool ext_ram(uint32_t a) { return a >= 0x100000u && a < g_ram_top; }
 static inline uint8_t mem_rb(Machine* m, uint32_t a) {
     a = lin_mask(a);
-    if (a < 0xA0000u || ext_ram(a)) return g_ram[a];
+    if (a < 0xA0000u || ext_ram(a)) { if (a == g_probe_addr) mem_probe(m, a); return g_ram[a]; }
     return mem_rb_slow(m, a);
 }
 #ifdef PC98P_WATCH
@@ -56,7 +59,10 @@ static inline void mem_wb(Machine* m, uint32_t a, uint8_t v) {
 }
 static inline uint16_t mem_rw(Machine* m, uint32_t a) {
     uint32_t b = lin_mask(a);
-    if (b < 0x9FFFFu || (b >= 0x100000u && b + 1 < g_ram_top)) return (uint16_t)(g_ram[b] | (g_ram[b + 1] << 8));
+    if (b < 0x9FFFFu || (b >= 0x100000u && b + 1 < g_ram_top)) {
+        if (b - g_probe_addr + 1 <= 1u) mem_probe(m, g_probe_addr);   // b か b+1 が調べる番地
+        return (uint16_t)(g_ram[b] | (g_ram[b + 1] << 8));
+    }
     return mem_rw_slow(m, a);
 }
 static inline void mem_ww(Machine* m, uint32_t a, uint16_t v) {

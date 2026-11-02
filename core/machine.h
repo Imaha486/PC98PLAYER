@@ -107,6 +107,8 @@ struct Pegc {
     uint8_t  single;          // 1 画面モード（6Ah に 69h）: 512KB を続けて 1 枚として使う
     uint8_t  crt31;           // 09A8h: 1 = 31kHz（480 ライン）
     uint8_t  palidx;
+    uint8_t  ff_sel;          // 09A0h に書いた番号（モードフリップフロップの読み出し）
+    uint8_t  ff_selected;     // 09A0h に書いたことがある
     uint8_t  pal[256][3];     // G, R, B（8 ビット）
     uint8_t  mmio[0x200];      // E0000h-E01FFh の内容（E0004h・E0006h はバンク、E0100h は描き方 など）
 };
@@ -195,7 +197,6 @@ struct Config {
     std::string args;
     char     drive = 'A';
     int      cpu_mhz = 16;
-    int      video_colors = 16;    // Explicit opt-in for extended graphics
     int      gdc_5mhz = 0;          // DIP SW 2-8: グラフィック GDC を 5MHz で使える（0 = 2.5MHz の機械）
     int      sound_irq = 12;     // 既定は PC-9801-86 の INT5
     int      sound_board = 86;   // 86 / 26 / 0
@@ -245,6 +246,9 @@ struct PcmSample { uint64_t tick; int16_t l, r; };
     bool     ems = true;             // EMM386 相当（LIM EMS 4.0、ページフレーム D000h）
     int      ems_kb = 4096;
     int      ems_frame = 0xD000;     // ページフレームのセグメント（EMSFrame=、C000h か D000h）
+    bool     pc9821 = false;         // PC-9821 として見せる（BIOS の 045Ch bit6 = 256 色あり。PC9821=）
+    bool     pc9821_ask = false;
+    int      video_colors = 16;      // VideoColors=256 は PC9821=1 と同じ（256 色の PR の書き方）     // INI に PC9821= が無い: PC-9821 らしいアクセスがあったら尋ねる
     bool     ems_from_config = false;  // CONFIG.SYS の /NOEMS を見て EMS を出さないことにした
     int      xms_kb = 8192;          // HIMEM.SYS 相当（XMS 3.0）。0 で無し
     int      ext_kb = 8192;          // 拡張メモリ（1MB より上の RAM。BIOS の 0401h に見せ、自前で保護モードに入るソフトが使う）。0 で無し
@@ -281,7 +285,11 @@ struct MouseDrv {
     int      sens_x, sens_y, sens_d;
 };
 
+// PC9821= が無いときに PC-9821 らしいアクセスがあったら呼ぶ（ホストが尋ねる）。true で PC-9821 にする
+typedef bool (*Pc9821AskFn)(void* user);
+
 struct Machine {
+    Pc9821AskFn ask_pc9821 = nullptr; void* ask_pc9821_user = nullptr;
     Cpu      cpu;
     uint8_t* ram;               // ram_size バイト（1MB + 拡張メモリ。少なくとも PC98_RAM_SIZE）
     uint32_t ram_size;
@@ -305,7 +313,7 @@ struct Machine {
     AvgDrv   avg;
     AvsFm    avsfm;
     Pegc     pegc;
-    PegcPlanar pegc_planar;
+    PegcPlanar pegc_planar;      // プレーンモードのラッチ
     std::vector<uint8_t> pegc_vram;  // 256 色の VRAM（512KB）
     Config   cfg;
 
@@ -447,6 +455,8 @@ void avgdrv_install(Machine* m);
 void avgdrv_hle(Machine* m);
 
 // avsdrv.cpp
+void pc9821_probe(Machine* m, const char* why);
+static inline bool is_pc9821(const Machine* m) { return m->cfg.pc9821 || m->cfg.video_colors == 256; }   // 256 色のグラフィックがある機械   // PC-9821 らしいアクセス（PC9821= が無いときだけ尋ねる）
 void avsfm_hle(Machine* m);
 void avsfm_reset(Machine* m);
 void avsfm_advance(Machine* m, uint32_t t);

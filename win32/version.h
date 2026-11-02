@@ -3,5 +3,6 @@
 #pragma once
 #define PC98P_VER_Y   26
 #define PC98P_VER_M   11
-#define PC98P_VER_D   1
-#define PC98P_VER_STR "261101"
+#define PC98P_VER_D   2
+#define PC98P_VER_REV 2                 // 同じ日の 2 回目の版（261102-2）
+#define PC98P_VER_STR "261102-2"

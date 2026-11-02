@@ -15,6 +15,23 @@ uint8_t* g_ram = nullptr;
 uint32_t g_addr_mask = 0xFFFFF;
 uint32_t g_ram_top = PC98_RAM_SIZE;
 uint32_t g_side_fx = 0;
+uint32_t g_probe_addr = 0xFFFFFFFFu;
+
+// ---- PC-9821 らしいアクセス ------------------------------------------------------------
+// INI に PC9821= が無いとき、BIOS の 045Ch を読む・09A0h を使う・6Ah で 256 色にする、のどれかがあったら
+// ホストに尋ね、「はい」なら PC-9821 として見せる（045Ch bit6 をその場で立てるので、読んだ値から有効になる）。
+void pc9821_probe(Machine* m, const char* why) {
+    if (!m->cfg.pc9821_ask) return;
+    m->cfg.pc9821_ask = false;
+    g_probe_addr = 0xFFFFFFFFu;
+    if (!m->ask_pc9821) return;
+    plog("[pc9821] PC-9821 らしいアクセス（%s）。PC-9821 として動かすか尋ねます\n", why);
+    if (m->ask_pc9821(m->ask_pc9821_user)) {
+        m->cfg.pc9821 = true;
+        m->ram[0x45C] |= 0x40;
+    }
+}
+void mem_probe(Machine* m, uint32_t a) { (void)a; pc9821_probe(m, "BIOS の 045Ch"); }
 extern int g_irq_hint;
 
 void egc_reset(Machine* m);
@@ -593,8 +610,8 @@ void mem_wb_slow(Machine* m, uint32_t a, uint8_t v) {
 }
 uint16_t mem_rw_slow(Machine* m, uint32_t a) {
     g_side_fx++;
-    if (pegc_window(m, a & g_addr_mask) && pegc_window(m, (a + 1) & g_addr_mask)) return pegc_read(m, a & g_addr_mask, 2);
     uint32_t b = a & g_addr_mask;
+    if (pegc_window(m, b) && pegc_window(m, (a + 1) & g_addr_mask)) return pegc_read(m, b, 2);   // 256 色: 2 バイトを 1 回で（プレーンモードの 16 ドット）
     if (!m->pegc.on && egc_on(m)) {
         uint32_t off, off2;
         int p = plane_of(b, &off);
@@ -603,9 +620,9 @@ uint16_t mem_rw_slow(Machine* m, uint32_t a) {
     return (uint16_t)(mem_rb(m, a) | (mem_rb(m, a + 1) << 8));
 }
 void mem_ww_slow(Machine* m, uint32_t a, uint16_t v) {
-    if (pegc_window(m, a & g_addr_mask) && pegc_window(m, (a + 1) & g_addr_mask)) { pegc_write(m, a & g_addr_mask, v, 2); return; }
     uint32_t b = a & g_addr_mask;
     if (b + 1 >= g_watch_lo && b < g_watch_hi) plog("[w] %05X <- %04X (w) @%04X:%04X\n", b, v, m->cpu.op_cs, m->cpu.op_ip);
+    if (pegc_window(m, b) && pegc_window(m, (a + 1) & g_addr_mask)) { g_side_fx++; pegc_write(m, b, v, 2); return; }
     if (!m->pegc.on && egc_on(m)) {
         uint32_t off, off2;
         int p = plane_of(b, &off);
@@ -704,7 +721,6 @@ uint8_t io_in8_(Machine* m, uint16_t port) {
     case 0xF2: return m->a20 ? 0x00 : 0x01;
     case 0xF6: return m->a20 ? 0x00 : 0x01;
     case 0x5F: return 0xFF;
-    case 0x9A0: return (uint8_t)(m->gdc_clk5 ? 0x02 : 0x00);   // 表示モード（24kHz）。bit1 = グラフィック GDC 5MHz
     case 0x0E8E: case 0x0E8F: return 0xFF;
     }
     if (m->cfg.midi && port == 0xE0D0) return mpu_read_data(m);
@@ -1186,14 +1202,13 @@ void machine_state_load(Machine* m, StateR& r) {
     if (r.peek_tag("MDRV")) { r.tag("MDRV"); uint16_t so = m->mdrv.stub_off, po = m->mdrv.ptr_off; r.pod(m->mdrv); m->mdrv.stub_off = so; m->mdrv.ptr_off = po; }
     if (r.peek_tag("GCLK")) { r.tag("GCLK"); r.pod(m->gdc_clk5); } else m->gdc_clk5 = 0;
     if (r.peek_tag("AVSD")) { r.tag("AVSD"); r.pod(m->avs); } else { uint8_t on = m->avs.on; avsdrv_reset(m); m->avs.on = on; }
-    bool upstream_pegc = r.peek_tag("AVSF");
-    if (r.peek_tag("AVSF")) { r.tag("AVSF"); r.pod(m->avsfm); } else avsfm_reset(m);
+    bool with_avsf = r.peek_tag("AVSF");
+    if (with_avsf) { r.tag("AVSF"); r.pod(m->avsfm); } else avsfm_reset(m);
     pegc_clear(m);
     if (r.peek_tag("PEGC")) {
         r.tag("PEGC");
-        if (upstream_pegc) {
-            r.pod(m->pegc); r.bytes(m->pegc_vram.data(), m->pegc_vram.size());
-        } else { // Earlier versions of this PR stored VRAM before the registers.
+        if (with_avsf) { r.pod(m->pegc); r.bytes(m->pegc_vram.data(), m->pegc_vram.size()); }
+        else {   // 256 色の PR の途中の形式（VRAM が先、レジスタが後）
             r.bytes(m->pegc_vram.data(), m->pegc_vram.size());
             r.pod(m->pegc.pal); r.pod(m->pegc.mmio);
             r.pod(m->pegc_planar.source); r.pod(m->pegc_planar.pattern);

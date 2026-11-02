@@ -126,7 +126,6 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
         for (auto& c : g) c = (char)toupper((unsigned char)c);
         ps->cfg.gdc_5mhz = (g == "5" || g == "5MHZ" || g == "5.0") ? 1 : 0;
     }
-    ps->cfg.video_colors = I("VIDEOCOLORS",16)==256?256:16;
     ps->cfg.sound_board = I("SOUNDBOARD", 86);
     ps->cfg.sound_bios = I("SOUNDBIOS", 0) != 0;
     ps->cfg.sound_irq = I("SOUNDIRQ", 12);
@@ -251,6 +250,10 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
         ps->cfg.ems_from_config = true;
     } else ps->cfg.ems = I("EMS", 1) != 0;
     ps->cfg.ems_kb = I("EMSKB", 4096);
+    ps->cfg.pc9821 = I("PC9821", 0) != 0;
+    ps->cfg.video_colors = I("VideoColors", 16) == 256 ? 256 : 16;   // 256 色の PR の書き方（PC9821=1 と同じ）
+    if (ps->cfg.video_colors == 256) ps->cfg.pc9821 = true;
+    ps->cfg.pc9821_ask = G("PC9821", "").empty() && ps->cfg.video_colors != 256;
     { std::string f = G("EMSFrame", ""); ps->cfg.ems_frame = (!f.empty() && (f[0] == 'C' || f[0] == 'c')) ? 0xC000 : 0xD000; }
     if (ps->cfg.ems_kb < 16) ps->cfg.ems = false;
     if (ps->cfg.ems_kb > 32768) ps->cfg.ems_kb = 32768;
@@ -398,6 +401,14 @@ bool Player::init(const PlayerSettings& s, std::string* err) {
     floppy::set_drive_letter(ps.cfg.floppy_drive);   // DOS のドライブ表を作る前に決めておく
     floppy::set_drive_letter_unit(1, ps.cfg.boot_fd ? 0 : ps.cfg.floppy_drive2);
     m = machine_create(ps.cfg);
+    m->ask_pc9821_user = this;
+    m->ask_pc9821 = [](void* u) -> bool {
+        Player* p = (Player*)u;
+        bool yes = p->ask_pc9821 ? p->ask_pc9821(p->ask_pc9821_user) : false;
+        p->ps.cfg.pc9821 = yes;
+        p->ps.cfg.pc9821_ask = false;
+        return yes;
+    };
     floppy::eject();
     if (!ps.cfg.floppy_image.empty()) {
         std::string e;

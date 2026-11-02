@@ -487,9 +487,12 @@ static void int18(Machine* m) {
         for (int i = 0; i < 4; i++) m->dig_pal[i] = mem_rb(m, a + i);
         return; }
     case 0x44: m->border = (uint8_t)(CX(m) >> 8); return;
-    case 0x4D: { // Extended graphics switch: CH=0 legacy, CH=1 256 colors.
-        uint8_t mode=(uint8_t)(CX(m)>>8);
-        if(m->cfg.video_colors==256 && mode<=1) m->pegc.on=mode;
+    case 0x4D: {   // PC-9821: 拡張グラフィックの切り替え（CH=0 16 色、CH=1 256 色）。9801 の BIOS には無い
+        uint8_t ch = (uint8_t)(CX(m) >> 8);
+        if (ch <= 1) pc9821_probe(m, "INT 18h AH=4Dh");
+        if (!is_pc9821(m) || ch > 1) return;
+        if (m->pegc.on != ch) plog("[pegc] %s（INT 18h AH=4Dh）\n", ch ? "256 色モードにしました" : "16 色モードに戻しました");
+        m->pegc.on = ch;
         return; }
     default:
         if (m->cfg.trace) plog("[bios] INT 18h AH=%02Xh 未対応\n", ah);
@@ -851,7 +854,8 @@ void bios_init(Machine* m) {
     r[0x594] = 0;
     r[0x481] = 0x00;
     r[0x458] = 0x00;
-    r[0x45C] = m->cfg.video_colors==256 ? 0x40 : 0; // Extended graphics capability, supplied by our HLE.
+    if (is_pc9821(m)) r[0x45C] |= 0x40;   // PC-9821（256 色のグラフィックあり）
+    { extern uint32_t g_probe_addr; g_probe_addr = (m->cfg.pc9821_ask && !is_pc9821(m)) ? 0x45Cu : 0xFFFFFFFFu; }
     r[0x55D] = 0x01;               // ハードディスク（SASI/IDE）がユニット 0 に付いている（ゲームのフォルダ）
     r[0x55C] = 0x03;               // 1MB の FDD がユニット 0・1 に付いている（仮想フロッピーはユニット 0）
     r[0x712] = 24;                 // MS-DOS: テキストの行数-1（master.lib などが参照）

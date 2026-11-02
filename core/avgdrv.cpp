@@ -47,7 +47,8 @@ void avgdrv_hle(Machine* m) {
     uint8_t bh = (uint8_t)(c->r[EBX] >> 8), bl = (uint8_t)c->r[EBX];
     switch (ah) {
     case 0x00:   // 画面モード（BH=21h: 256 色。BL bit0: 0 = 2 画面（256KB ずつ）、1 = 1 画面（512KB を続けて使う））
-        if (bh == 0x21) {
+        if (bh == 0x21) pc9821_probe(m, "AVGDRV の 256 色");
+        if (bh == 0x21 && is_pc9821(m)) {
             m->modeff2[3] = 1;
             pg.on = 1; pg.single = bl & 1;
             m->gdcs.display = 1;

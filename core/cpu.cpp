@@ -856,7 +856,7 @@ static void op0f() {
 // ---- 1 命令 ------------------------------------------------------------------
 static uint16_t s_tr_cs, s_tr_ip; static int s_tr_on;
 // デバッグ用: 直近に実行した命令の位置（ITRACE_STOP の CS に入ったら一度だけ出力）
-uint32_t g_itr[256]; unsigned g_itr_pos; int g_itr_stop_cs = -1;
+uint32_t g_itr[256]; unsigned g_itr_pos; int g_itr_stop_cs = -1; uint32_t g_itr_at = 0;   // ITRACE_AT=cs:ip
 static void itr_dump() {
     fprintf(stderr, "[itrace] last instructions:\n");
     for (unsigned i = 0; i < 256; i++) { uint32_t v = g_itr[(g_itr_pos + i) & 255]; fprintf(stderr, " %04X:%04X", v >> 16, v & 0xFFFF); if ((i & 7) == 7) fprintf(stderr, "\n"); }
@@ -866,6 +866,11 @@ static void step() {
     if (g_snap_cs >= 0 && C->sr[CS_] == (uint16_t)g_snap_cs && g_ram) {
         FILE* o = fopen(g_snap_path, "wb"); if (o) { fwrite(g_ram, 1, 0x100000, o); fclose(o); }
         fprintf(stderr, "[snap] CS=%04X IP=%04X AX=%04X\n", C->sr[CS_], C->ip, (unsigned)(C->r[EAX] & 0xFFFF)); g_snap_cs = -1;
+    }
+    if (g_itr_at) {
+        uint32_t here = ((uint32_t)C->sr[CS_] << 16) | C->ip;
+        if (here == g_itr_at) { itr_dump(); g_itr_at = 0; }
+        else g_itr[g_itr_pos++ & 255] = here;
     }
     if (g_itr_stop_cs >= 0) {
         if (C->sr[CS_] == (uint16_t)g_itr_stop_cs) { itr_dump(); g_itr_stop_cs = -1; }

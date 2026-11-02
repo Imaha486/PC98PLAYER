@@ -66,6 +66,10 @@ struct Player {
     // MIDI の出口（ホストが設定）。完結したメッセージ（SysEx は F0..F7 まるごと）を渡す
     void (*midi_sink)(void* user, const uint8_t* msg, int len) = nullptr;
     void* midi_user = nullptr;
+    // PC9821= が無いのに PC-9821 らしいアクセスがあったときに尋ねる（ホストが設定）。true で PC-9821 にする。
+    // 答えは ps にも残し、起動し直しても尋ね直さない
+    bool (*ask_pc9821)(void* user) = nullptr;
+    void* ask_pc9821_user = nullptr;
     uint8_t midi_status = 0, midi_need = 0;
     std::vector<uint8_t> midi_msg;
     void midi_feed(uint8_t b);
