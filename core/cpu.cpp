@@ -24,11 +24,11 @@ void dbg_note_insn(Machine* m);
 void plog(const char* fmt, ...);
 
 int g_irq_hint = 0;
-int g_trace_int = -1;
+int g_trace_int = -1; int g_trace_full = 0;   // TRACEFULL=n: INT の中の命令を n 回ぶん全部出す
 uint16_t g_ifoff_cs = 0, g_ifoff_ip = 0; int g_ifoff_kind = 0; bool g_if_track = false;
 uint32_t g_int2f15_redirect = 0;   // 0 以外: INT 2Fh AH=15h をこの入口（セグメント << 16 | オフセット）へ回す   // 調べもの: 最後に割込みを禁止した命令（1 = CLI, 2 = POPF）
 unsigned long long g_frame_dbg;
-int g_prof_cs = -1; unsigned* g_prof = nullptr;      // Machine が「受け付け待ちの IRQ があるかも」を立てる
+int g_prof_cs = -1; unsigned* g_prof = nullptr; unsigned* g_prof_lin = nullptr;      // Machine が「受け付け待ちの IRQ があるかも」を立てる
 
 static Cpu*     C;
 static Machine* M;
@@ -861,13 +861,20 @@ static void itr_dump() {
     fprintf(stderr, "[itrace] last instructions:\n");
     for (unsigned i = 0; i < 256; i++) { uint32_t v = g_itr[(g_itr_pos + i) & 255]; fprintf(stderr, " %04X:%04X", v >> 16, v & 0xFFFF); if ((i & 7) == 7) fprintf(stderr, "\n"); }
 }
+int g_snap_cs = -1; const char* g_snap_path = nullptr; extern uint8_t* g_ram;
 static void step() {
+    if (g_snap_cs >= 0 && C->sr[CS_] == (uint16_t)g_snap_cs && g_ram) {
+        FILE* o = fopen(g_snap_path, "wb"); if (o) { fwrite(g_ram, 1, 0x100000, o); fclose(o); }
+        fprintf(stderr, "[snap] CS=%04X IP=%04X AX=%04X\n", C->sr[CS_], C->ip, (unsigned)(C->r[EAX] & 0xFFFF)); g_snap_cs = -1;
+    }
     if (g_itr_stop_cs >= 0) {
         if (C->sr[CS_] == (uint16_t)g_itr_stop_cs) { itr_dump(); g_itr_stop_cs = -1; }
         else g_itr[g_itr_pos++ & 255] = ((uint32_t)C->sr[CS_] << 16) | C->ip;
     }
-    if (s_tr_on && C->ip == s_tr_ip && C->sr[CS_] == s_tr_cs) { s_tr_on = 0; fprintf(stderr, "   -> AX=%04X BX=%04X CX=%04X DX=%04X FL=%04X\n", C->r[EAX] & 0xFFFF, C->r[EBX] & 0xFFFF, C->r[ECX] & 0xFFFF, C->r[EDX] & 0xFFFF, C->fl & 0xFFFF); }
+    if (s_tr_on && g_trace_full > 0 && !(C->ip == s_tr_ip && C->sr[CS_] == s_tr_cs)) fprintf(stderr, "  %04X:%04X AX=%04X BX=%04X CX=%04X DX=%04X SI=%04X DI=%04X DS=%04X ES=%04X\n", C->sr[CS_], C->ip, C->r[EAX] & 0xFFFF, C->r[EBX] & 0xFFFF, C->r[ECX] & 0xFFFF, C->r[EDX] & 0xFFFF, C->r[ESI] & 0xFFFF, C->r[EDI] & 0xFFFF, C->sr[DS_], C->sr[ES_]);
+    if (s_tr_on && C->ip == s_tr_ip && C->sr[CS_] == s_tr_cs) { s_tr_on = 0; if (g_trace_full > 0) g_trace_full--; fprintf(stderr, "   -> AX=%04X BX=%04X CX=%04X DX=%04X FL=%04X\n", C->r[EAX] & 0xFFFF, C->r[EBX] & 0xFFFF, C->r[ECX] & 0xFFFF, C->r[EDX] & 0xFFFF, C->fl & 0xFFFF); }
     C->op_ip = C->ip; C->op_cs = C->sr[CS_];
+    if (g_prof_lin) g_prof_lin[(((uint32_t)C->sr[CS_] << 4) + C->ip) & 0xFFFFF]++;
     if (g_prof) { if (g_prof_cs == -2) g_prof[C->sr[CS_]]++; else if (C->sr[CS_] == g_prof_cs) g_prof[C->ip & 0xFFFF]++; }
     s_cs32 = cs32();
     d_seg = -1; d_o32 = s_cs32; d_a32 = s_cs32; d_rep = 0;

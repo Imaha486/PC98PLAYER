@@ -123,8 +123,8 @@ static uint8_t rev8(uint8_t v) { uint8_t r = 0; for (int i = 0; i < 8; i++) if (
 static void set_digital(Machine* m, int pal, int col) {
     static const int lo_idx[4] = {3, 1, 2, 0}, hi_idx[4] = {7, 5, 6, 4};
     for (int k = 0; k < 4; k++) {
-        if (lo_idx[k] == pal) m->degpal[k] = (uint8_t)((m->degpal[k] & 0x0F) | ((col & 7) << 4));
-        if (hi_idx[k] == pal) m->degpal[k] = (uint8_t)((m->degpal[k] & 0xF0) | (col & 7));
+        if (lo_idx[k] == pal) m->dig_pal[k] = (uint8_t)((m->dig_pal[k] & 0x0F) | ((col & 7) << 4));
+        if (hi_idx[k] == pal) m->dig_pal[k] = (uint8_t)((m->dig_pal[k] & 0xF0) | (col & 7));
     }
 }
 

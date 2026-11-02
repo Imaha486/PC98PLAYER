@@ -13,9 +13,9 @@
 static const uint32_t k_rates[8] = {44100, 33075, 22050, 16538, 11025, 8269, 5513, 4134};
 
 static inline int frame_bytes(const Pcm86& p) {
-    // dactrl bit6: 1=8bit / bit5: 左 / bit4: 右
-    bool b8 = (p.dactrl & 0x40) != 0;
-    int ch = ((p.dactrl >> 5) & 1) + ((p.dactrl >> 4) & 1);
+    // dac_mode bit6: 1=8bit / bit5: 左 / bit4: 右
+    bool b8 = (p.dac_mode & 0x40) != 0;
+    int ch = ((p.dac_mode >> 5) & 1) + ((p.dac_mode >> 4) & 1);
     if (ch == 0) ch = 1;
     return (b8 ? 1 : 2) * ch;
 }
@@ -46,8 +46,8 @@ void pcm86_advance(Machine* m, uint32_t t) {
                 int16_t v = (int16_t)((p.fifo[p.rpos] << 8) | p.fifo[(p.rpos + 1) & 0x7FFF]);
                 p.rpos = (p.rpos + 2) & 0x7FFF; p.count -= 2; return v;
             };
-            bool b8 = (p.dactrl & 0x40) != 0;
-            bool L = (p.dactrl & 0x20) != 0, R = (p.dactrl & 0x10) != 0;
+            bool b8 = (p.dac_mode & 0x40) != 0;
+            bool L = (p.dac_mode & 0x20) != 0, R = (p.dac_mode & 0x10) != 0;
             if (L && R) { l = get(b8); r = get(b8); }
             else if (L) l = get(b8);
             else if (R) r = get(b8);
@@ -76,7 +76,7 @@ uint8_t pcm86_in(Machine* m, uint16_t port) {
         if (((m->ticks * k_rates[p.ctrl & 7] * 2) / MASTER_CLOCK) & 1) v |= 0x01;
         return v; }
     case 0xA468: return (uint8_t)((p.ctrl & ~0x10) | (p.irqflag ? 0x10 : 0));
-    case 0xA46A: return p.dactrl;
+    case 0xA46A: return p.dac_mode;
     case 0xA46C: return 0;
     }
     return 0xFF;
@@ -98,7 +98,7 @@ void pcm86_out(Machine* m, uint16_t port, uint8_t v) {
         return; }
     case 0xA46A:
         if (p.ctrl & 0x20) p.thresh = (v == 0xFF) ? 0x7FFC : (uint16_t)((v + 1) << 7);
-        else p.dactrl = v;
+        else p.dac_mode = v;
         return;
     case 0xA46C:
         if (p.count < 0x8000) { p.fifo[p.wpos] = v; p.wpos = (p.wpos + 1) & 0x7FFF; p.count++; }
@@ -109,7 +109,7 @@ void pcm86_out(Machine* m, uint16_t port, uint8_t v) {
 void pcm86_reset(Machine* m) {
     memset(&m->pcm86, 0, sizeof(m->pcm86));
     m->pcm86.vol = 15;
-    m->pcm86.dactrl = 0x32;   // 16bit ステレオ
+    m->pcm86.dac_mode = 0x32;   // 16bit ステレオ
     m->pcm86.thresh = 0x80;
     m->pcm_out.clear();
 }

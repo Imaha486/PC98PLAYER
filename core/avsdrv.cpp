@@ -52,6 +52,11 @@ void avsdrv_install(Machine* m) {
     uint16_t o = bios_hle_stub(m, HLE_AVSDRV);
     m->ram[0xD9 * 4 + 0] = (uint8_t)o; m->ram[0xD9 * 4 + 1] = (uint8_t)(o >> 8);
     m->ram[0xD9 * 4 + 2] = (uint8_t)ROMSEG; m->ram[0xD9 * 4 + 3] = (uint8_t)(ROMSEG >> 8);
+    // INT DAh（FM 音源）
+    avsfm_reset(m);
+    o = bios_hle_stub(m, HLE_AVSFM);
+    m->ram[0xDA * 4 + 0] = (uint8_t)o; m->ram[0xDA * 4 + 1] = (uint8_t)(o >> 8);
+    m->ram[0xDA * 4 + 2] = (uint8_t)ROMSEG; m->ram[0xDA * 4 + 3] = (uint8_t)(ROMSEG >> 8);
     // 装置ヘッダ（文字装置 AVSDRV$$）。戦略・割込みルーチンは RETF だけ。NUL の次につなぐ
     uint16_t h = bios_rom_alloc(m, 0x20);
     uint32_t b = lin(ROMSEG, h);
@@ -84,7 +89,7 @@ static void start_hw(Machine* m) {
     desc_fmt(m, m->avs.q_seg[0], m->avs.q_off[0], &b16, &st, &rate);
     Pcm86& p = m->pcm86;
     p.rpos = p.wpos = 0; p.count = 0; p.irqflag = 0;
-    p.dactrl = (uint8_t)(0x30 | (b16 ? 0 : 0x40));   // いつもステレオ（モノラルは左右に同じ標本）
+    p.dac_mode = (uint8_t)(0x30 | (b16 ? 0 : 0x40));   // いつもステレオ（モノラルは左右に同じ標本）
     p.ctrl = (uint8_t)(0x80 | rate);
     p.acc = 0;
     m->avs.ratio = st ? 1 : 2;

@@ -920,19 +920,23 @@ static void present(HDC dc) {
     HBRUSH black = (HBRUSH)GetStockObject(BLACK_BRUSH);
     if (dy > 0) { RECT r1 = {0, 0, cw, dy}; FillRect(mem, &r1, black); RECT r2 = {0, dy + dh, cw, ch}; FillRect(mem, &r2, black); }
     if (dx > 0) { RECT r1 = {0, 0, dx, ch}; FillRect(mem, &r1, black); RECT r2 = {dx + dw, 0, cw, ch}; FillRect(mem, &r2, black); }
+    // 640x480（PC-9821 の 31kHz）も、実機のモニタと同じく 640x400 と同じ大きさに縦を縮めて映す
+    int fbh = (g_p->fb_h == 480) ? 480 : 400;
     SetStretchBltMode(mem, g_p->ps.smooth ? HALFTONE : COLORONCOLOR);
     if (g_p->ps.smooth) SetBrushOrgEx(mem, 0, 0, nullptr);
     if (g_menu != MENU_NONE) {
         // ゲーム画面を暗くする
-        static std::vector<uint32_t> dim(640 * 400);
-        for (int i = 0; i < 640 * 400; i++) {
+        static std::vector<uint32_t> dim(640 * 480);
+        g_bmi.bmiHeader.biHeight = -fbh;
+        for (int i = 0; i < 640 * fbh; i++) {
             uint32_t c = g_p->fb[i];
             dim[i] = (((c >> 16) & 255) * 30 / 100 << 16) | (((c >> 8) & 255) * 30 / 100 << 8) | ((c & 255) * 30 / 100);
         }
-        StretchDIBits(mem, dx, dy, dw, dh, 0, 0, 640, 400, dim.data(), &g_bmi, DIB_RGB_COLORS, SRCCOPY);
+        StretchDIBits(mem, dx, dy, dw, dh, 0, 0, 640, fbh, dim.data(), &g_bmi, DIB_RGB_COLORS, SRCCOPY);
         draw_menu(mem, dx, dy, dw, dh);
     } else {
-        StretchDIBits(mem, dx, dy, dw, dh, 0, 0, 640, 400, g_p->fb, &g_bmi, DIB_RGB_COLORS, SRCCOPY);
+        g_bmi.bmiHeader.biHeight = -fbh;
+        StretchDIBits(mem, dx, dy, dw, dh, 0, 0, 640, fbh, g_p->fb, &g_bmi, DIB_RGB_COLORS, SRCCOPY);
         if (GetTickCount() < g_toast_until) {
             double k = dw / 640.0;
             double est = 24;   // 文字の幅の見積もり（全角 15、半角 7.5）で箱の幅を決める
@@ -1172,9 +1176,11 @@ static void write_template_ini(const std::wstring& path, const std::string& star
         "; 起動時のカレントディレクトリ（例 A:\\NANPA\\。ゲームのドライブに無ければ作る。空なら指定なし）\r\n"
         "CurrentDirectory=\r\n"
         "FreeSpaceMB=96\r\n"
-        "; EMS（EMM386 相当, ページフレーム D000h）と XMS（HIMEM.SYS 相当）。0 で無し\r\n"
+        "; EMS（EMM386 相当）と XMS（HIMEM.SYS 相当）。0 で無し\r\n"
         "EMS=1\r\n"
         "EMSKB=4096\r\n"
+        "; EMS のページフレーム（D000 / C000。C000h を前提にする PC-9821 用のソフトでは C000）\r\n"
+        "EMSFrame=D000\r\n"
         "XMS=1\r\n"
         "XMSKB=8192\r\n"
         "; 拡張メモリ（1MB より上の RAM、MB）。自分で保護モードに切り替えて使うゲーム向け（BIOS の 0401h に見せる）。0 で無し\r\n"
@@ -1253,6 +1259,30 @@ static bool load_ini_any(const std::wstring& path, Ini& ini) {
 // ---- 最初に実行するファイルを選ぶ（INI を作るとき） ------------------------------------
 //  ゲームのフォルダを開いたファイル選択ダイアログ（*.* が対象。BAT/EXE/COM どれでも）。
 //  選んだファイルの、ゲームのフォルダからの相対パス（直下ならファイル名だけ）を返す。やめたら空
+// INI が無いとき、迷わず決められるか: フォルダ（直下）にバッチファイル（.BAT）が無く、
+// 実行ファイル（.EXE・.COM。PC98PLAYER.EXE は除く）がちょうど 1 個なら、そのファイル名。
+// それ以外（バッチがある・実行ファイルが 0 個や 2 個以上）は空 = これまでどおり選んでもらう
+static std::string single_start(const std::wstring& dir) {
+    WIN32_FIND_DATAW fd;
+    std::vector<std::wstring> exes;
+    bool bat = false;
+    HANDLE hf = FindFirstFileW((dir + L"\\*.*").c_str(), &fd);
+    if (hf == INVALID_HANDLE_VALUE) return "";
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        std::wstring n = upper(fd.cFileName);
+        size_t d = n.rfind(L'.');
+        if (d == std::wstring::npos) continue;
+        std::wstring ext = n.substr(d), base = n.substr(0, d);
+        if (ext == L".BAT") bat = true;
+        else if ((ext == L".EXE" || ext == L".COM") && base.compare(0, 10, L"PC98PLAYER") != 0) exes.push_back(fd.cFileName);
+    } while (FindNextFileW(hf, &fd));
+    FindClose(hf);
+    if (bat || exes.size() != 1) return "";
+    std::string n = U(upper(exes[0]));
+    for (unsigned char c : n) if (c >= 0x80) return "";   // 日本語の名前の Windows のファイルなど（MS-DOS のプログラムではない）
+    return n;
+}
 static std::string choose_start(const std::wstring& dir, const std::string& guess, const std::wstring& title) {
     std::wstring ud = upper(dir);
     if (!ud.empty() && ud.back() != L'\\') ud += L'\\';
@@ -1662,6 +1692,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
         g_disk_list = g_iu.disks;
         g_disk_index = g_iu.disk;
     } else {
+    if (GetFileAttributesW(ini_path.c_str()) == INVALID_FILE_ATTRIBUTES && !g_boot_override.on) {
+        // INI が無い: バッチファイルが無く、実行ファイルが 1 個だけなら、それを Start= にした INI を
+        // 何も聞かずに作ってそのまま起動する（何も分からなくても、EXE を置いて起動するだけで遊べるように）
+        std::string one = single_start(dir);
+        if (!one.empty()) write_template_ini(ini_path, one);
+    }
     if (GetFileAttributesW(ini_path.c_str()) == INVALID_FILE_ATTRIBUTES && !g_boot_override.on) {
         // INI が無い: 最初に実行するファイルを選んでもらう（やめたら従来どおり推測）
         std::string st = choose_start(dir, guess_start(dir), L"PC98PLAYER.INI を作ります ― 最初に実行するファイルを選んでください");

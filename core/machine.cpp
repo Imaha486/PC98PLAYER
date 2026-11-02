@@ -54,8 +54,9 @@ static void civil_from_days(int z, int* y, int* m, int* d) {
     *d = doy - (153 * mp + 2) / 5 + 1; *m = mp + (mp < 10 ? 3 : -9); *y = yy + (*m <= 2);
 }
 static int s_start_days = -1;   // 起動した日（実際の日付）
+time_t g_fixed_now = 0;   // 確かめ用: 0 以外ならこの時刻に固定（harness の FIXTIME=）
 void machine_now(Machine* m, PcTime* o) {
-    time_t now = time(nullptr); struct tm lt;
+    time_t now = g_fixed_now ? g_fixed_now : time(nullptr); struct tm lt;
 #ifdef _WIN32
     localtime_s(&lt, &now);
 #else
@@ -238,8 +239,10 @@ static void opna_recalc(Machine* m) {
     if (m->opna.timer_b_period <= 0) m->opna.timer_b_period = (int32_t)(k * 16u);
 }
 unsigned g_opna_writes = 0, g_opna_keyon = 0, g_opna_hist[2][256];
+FILE* g_opna_log = nullptr;   // 確かめ用（harness の OPNALOG=）
 void opna_write(Machine* m, int part, uint8_t addr, uint8_t val) {
     g_opna_hist[part][addr]++;
+    if (g_opna_log) fprintf(g_opna_log, "%u %d %02X %02X\n", (unsigned)m->frame_count, part, addr, val);
     g_opna_writes++; if (part == 0 && addr == 0x28 && (val & 0xF0)) g_opna_keyon++;
     m->opna.reg[part][addr] = val;
     if (part == 0 && addr == 0x28) m->opna.keyon[val & 7] = (uint8_t)(val & 0xF0);
@@ -541,9 +544,8 @@ static uint8_t mpu_read_data(Machine* m) {
 }
 
 uint8_t mem_rb_slow(Machine* m, uint32_t a) {
-    if(m->cfg.video_colors==256 && m->pegc.enabled && a>=0xE0000 && a<0xE0200) return m->pegc.registers[a-0xE0000];
-    if(pegc_window(m,a)) return (uint8_t)pegc_read(m,a,1);
     g_side_fx++;
+    if (m->pegc.on) { uint8_t pv; if (pegc_mem_rb(m, a, &pv)) return pv; }   // PC-9821 の 256 色
     if (a < 0xA4000) {
         if (a >= 0xA2000 && (a & 1)) return 0xFF;
         return m->tvram[a - 0xA0000];
@@ -557,7 +559,7 @@ uint8_t mem_rb_slow(Machine* m, uint32_t a) {
         if (m->grcg_mode & 0x80) return grcg_read(m, off);
         return m->gvram[m->draw_bank][p][off];
     }
-    if (a >= 0xD0000 && a < 0xE0000 && m->cfg.ems) return m->ram[a];   // EMS ページフレーム
+    if (m->cfg.ems && (ems_frame_hit(a) || ems_upper_mapped(a))) return m->ram[a];   // EMS ページフレームと、その外にマップした EMS
     if (a >= 0xCC000 && a < 0xD0000 && m->cfg.sound_bios && m->cfg.sound_board) return m->ram[a];   // サウンド BIOS の ROM
     if (a < 0xE0000) return 0xFF;
     if (a < 0x100000) return m->ram[a];
@@ -567,9 +569,8 @@ uint8_t mem_rb_slow(Machine* m, uint32_t a) {
 uint32_t g_watch_lo = 0, g_watch_hi = 0;
 void watch_hit(Machine* m, uint32_t a, uint32_t v, int w) { if (a < 0xA0000) fprintf(stderr, "[wf f%llu] %05X <- %0*X @%04X:%04X\n", (unsigned long long)m->frame_count, a, w * 2, v, m->cpu.op_cs, m->cpu.op_ip); }
 void mem_wb_slow(Machine* m, uint32_t a, uint8_t v) {
-    if(m->cfg.video_colors==256 && m->pegc.enabled && a>=0xE0000 && a<0xE0200) { m->pegc.registers[a-0xE0000]=v;return; }
-    if(pegc_window(m,a)) { pegc_write(m,a,v,1);return; }
     if (a >= g_watch_lo && a < g_watch_hi) plog("[w] %05X <- %02X grcg=%02X tile=%02X,%02X,%02X,%02X @%04X:%04X\n", a, v, m->grcg_mode, m->grcg_tile[0], m->grcg_tile[1], m->grcg_tile[2], m->grcg_tile[3], m->cpu.op_cs, m->cpu.op_ip);
+    if (m->pegc.on && pegc_mem_wb(m, a, v)) return;   // PC-9821 の 256 色
     if (a < 0xA4000) {
         if (a >= 0xA2000 && (a & 1)) return;
         m->tvram[a - 0xA0000] = v;
@@ -585,16 +586,16 @@ void mem_wb_slow(Machine* m, uint32_t a, uint8_t v) {
         m->gvram[m->draw_bank][p][off] = v;
         return;
     }
-    if (a >= 0xD0000 && a < 0xE0000 && m->cfg.ems) { m->ram[a] = v; return; }   // EMS ページフレーム
+    if (m->cfg.ems && (ems_frame_hit(a) || ems_upper_mapped(a))) { m->ram[a] = v; return; }   // EMS
     if (a < 0xE8000) return;
     if (a < 0x100000) return;                 // ROM
     if (a < g_ram_top) m->ram[a] = v;
 }
 uint16_t mem_rw_slow(Machine* m, uint32_t a) {
-    if(pegc_window(m,a & g_addr_mask) && pegc_window(m,(a+1)&g_addr_mask)) return pegc_read(m,a & g_addr_mask,2);
     g_side_fx++;
+    if (pegc_window(m, a & g_addr_mask) && pegc_window(m, (a + 1) & g_addr_mask)) return pegc_read(m, a & g_addr_mask, 2);
     uint32_t b = a & g_addr_mask;
-    if (egc_on(m)) {
+    if (!m->pegc.on && egc_on(m)) {
         uint32_t off, off2;
         int p = plane_of(b, &off);
         if (p >= 0 && plane_of(b + 1, &off2) == p) return egc_read_w(m, p, off);
@@ -602,10 +603,10 @@ uint16_t mem_rw_slow(Machine* m, uint32_t a) {
     return (uint16_t)(mem_rb(m, a) | (mem_rb(m, a + 1) << 8));
 }
 void mem_ww_slow(Machine* m, uint32_t a, uint16_t v) {
-    if(pegc_window(m,a & g_addr_mask) && pegc_window(m,(a+1)&g_addr_mask)) { pegc_write(m,a & g_addr_mask,v,2);return; }
+    if (pegc_window(m, a & g_addr_mask) && pegc_window(m, (a + 1) & g_addr_mask)) { pegc_write(m, a & g_addr_mask, v, 2); return; }
     uint32_t b = a & g_addr_mask;
     if (b + 1 >= g_watch_lo && b < g_watch_hi) plog("[w] %05X <- %04X (w) @%04X:%04X\n", b, v, m->cpu.op_cs, m->cpu.op_ip);
-    if (egc_on(m)) {
+    if (!m->pegc.on && egc_on(m)) {
         uint32_t off, off2;
         int p = plane_of(b, &off);
         if (p >= 0 && plane_of(b + 1, &off2) == p) { egc_write_w(m, p, off, v); return; }
@@ -667,6 +668,7 @@ uint8_t io_in8(Machine* m, uint16_t port) {
     return v;
 }
 uint8_t io_in8_(Machine* m, uint16_t port) {
+    { uint8_t pv; if ((port == 0x9A0 || port == 0x9A8 || (port >= 0xA8 && port <= 0xAE)) && pegc_io_in(m, port, &pv)) return pv; }
     switch (port) {
     case 0x00: return pic_read(m, 0, 0);
     case 0x02: return pic_read(m, 0, 1);
@@ -688,10 +690,10 @@ uint8_t io_in8_(Machine* m, uint16_t port) {
     case 0xA2: { if (m->gdcs.fifo.empty()) return 0; uint8_t v = m->gdcs.fifo.front(); m->gdcs.fifo.erase(m->gdcs.fifo.begin()); return v; }
     case 0xA4: return m->disp_bank;
     case 0xA6: return m->draw_bank;
-    case 0xA8: if(m->pegc.enabled) return m->palidx; return m->analog ? m->palidx : m->degpal[0];
-    case 0xAA: if(m->pegc.enabled) return m->pegc.palette[m->palidx][0]; return m->analog ? m->pal[m->palidx & 15][0] : m->degpal[1];
-    case 0xAC: if(m->pegc.enabled) return m->pegc.palette[m->palidx][1]; return m->analog ? m->pal[m->palidx & 15][1] : m->degpal[2];
-    case 0xAE: if(m->pegc.enabled) return m->pegc.palette[m->palidx][2]; return m->analog ? m->pal[m->palidx & 15][2] : m->degpal[3];
+    case 0xA8: return m->analog ? m->palidx : m->dig_pal[0];
+    case 0xAA: return m->analog ? m->pal[m->palidx & 15][0] : m->dig_pal[1];
+    case 0xAC: return m->analog ? m->pal[m->palidx & 15][1] : m->dig_pal[2];
+    case 0xAE: return m->analog ? m->pal[m->palidx & 15][2] : m->dig_pal[3];
     case 0xA9: { uint8_t v = cg_pattern(m); if (m->cfg.trace > 1) plog("[cg] code=%04X line=%02X left=%d -> %02X\n", m->cg_code, m->cg_line, m->cg_left, v); return v; }
     case 0x71: case 0x3FD9: return pit_read(m, 0);
     case 0x73: case 0x3FDB: return pit_read(m, 1);
@@ -702,8 +704,7 @@ uint8_t io_in8_(Machine* m, uint16_t port) {
     case 0xF2: return m->a20 ? 0x00 : 0x01;
     case 0xF6: return m->a20 ? 0x00 : 0x01;
     case 0x5F: return 0xFF;
-    case 0x9A0: if(m->cfg.video_colors==256 && m->pegc.selector==0x10) return (uint8_t)(m->pegc.enabled?1:0); return (uint8_t)(m->gdc_clk5 ? 0x02 : 0x00);   // 表示モード（24kHz）。bit1 = グラフィック GDC 5MHz
-    case 0x9A8: return 0x00;                // 31kHz 非対応
+    case 0x9A0: return (uint8_t)(m->gdc_clk5 ? 0x02 : 0x00);   // 表示モード（24kHz）。bit1 = グラフィック GDC 5MHz
     case 0x0E8E: case 0x0E8F: return 0xFF;
     }
     if (m->cfg.midi && port == 0xE0D0) return mpu_read_data(m);
@@ -736,6 +737,7 @@ void io_out8(Machine* m, uint16_t port, uint8_t v) {
     g_side_fx++;
     if (g_dbg_on) dbg_note_io(m, port, v, true, false);
     if (port >= g_trace_port_lo && port <= g_trace_port_hi && s_port_log++ < 3000) plog("[out] %04X <- %02X @%04X:%04X\n", port, v, m->cpu.op_cs, m->cpu.op_ip);
+    if ((port == 0x6A || port == 0x9A0 || port == 0x9A8 || (port >= 0xA8 && port <= 0xAE)) && pegc_io_out(m, port, v)) return;   // PC-9821 の 256 色
     switch (port) {
     case 0x00: pic_write(m, 0, 0, v); return;
     case 0x02: pic_write(m, 0, 1, v); return;
@@ -759,12 +761,7 @@ void io_out8(Machine* m, uint16_t port, uint8_t v) {
     case 0xA2: gdc_command(m, &m->gdcs, v); return;
     case 0x64: m->vsync_armed = 1; return;
     case 0x68: m->modeff[(v >> 1) & 7] = v & 1; return;
-    case 0x9A0: m->pegc.selector=v;return;
     case 0x6A: {
-        if(m->cfg.video_colors==256) {
-            if(v==0x20 || v==0x21) { m->pegc.enabled=v&1;return; }
-            if(v==0x68 || v==0x69) { m->pegc.single_page=v&1;return; }
-        }
         int bit = (v >> 1) & 0x7F;
         if (v == 0x84 || v == 0x85) { m->gdc_clk5 = (uint8_t)(v & 1); return; }   // グラフィック GDC のクロック 2.5MHz / 5MHz
         if (bit < 8) {
@@ -787,10 +784,10 @@ void io_out8(Machine* m, uint16_t port, uint8_t v) {
         return; }
     case 0xA4: m->disp_bank = v & 1; return;
     case 0xA6: m->draw_bank = v & 1; return;
-    case 0xA8: if(m->pegc.enabled) {m->palidx=v;return;} if (m->analog) m->palidx = v & 15; else m->degpal[0] = v; return;
-    case 0xAA: if(m->pegc.enabled) {m->pegc.palette[m->palidx][0]=v;return;} if (m->analog) m->pal[m->palidx & 15][0] = v & 15; else m->degpal[1] = v; return;
-    case 0xAC: if(m->pegc.enabled) {m->pegc.palette[m->palidx][1]=v;return;} if (m->analog) m->pal[m->palidx & 15][1] = v & 15; else m->degpal[2] = v; return;
-    case 0xAE: if(m->pegc.enabled) {m->pegc.palette[m->palidx][2]=v;return;} if (m->analog) m->pal[m->palidx & 15][2] = v & 15; else m->degpal[3] = v; return;
+    case 0xA8: if (m->analog) m->palidx = v & 15; else m->dig_pal[0] = v; return;
+    case 0xAA: if (m->analog) m->pal[m->palidx & 15][0] = v & 15; else m->dig_pal[1] = v; return;
+    case 0xAC: if (m->analog) m->pal[m->palidx & 15][1] = v & 15; else m->dig_pal[2] = v; return;
+    case 0xAE: if (m->analog) m->pal[m->palidx & 15][2] = v & 15; else m->dig_pal[3] = v; return;
     case 0x71: case 0x3FD9: pit_write(m, 0, v); return;
     case 0x73: case 0x3FDB: pit_write(m, 1, v); return;
     case 0x75: case 0x3FDD: pit_write(m, 2, v); return;
@@ -913,6 +910,7 @@ static void advance(Machine* m, uint32_t t) {
 
     // PCM86
     if (m->avs.playing) avsdrv_advance(m, t);
+    if (m->avsfm.running) avsfm_advance(m, t);
     if (m->pcm86.ctrl & 0x80) pcm86_advance(m, t);
     // MIDI（MPU のクロック・トゥ・ホスト）
     if (m->mpu.cth_on) mpu_advance(m, t);
@@ -1009,7 +1007,8 @@ Machine* machine_create(const Config& cfg) {
     g_addr_mask = 0xFFFFF;
     memset(m->tvram, 0, sizeof(m->tvram));
     memset(m->gvram, 0, sizeof(m->gvram));
-    m->pegc.registers[0x10c]=m->pegc.registers[0x10d]=0xff;
+    pegc_clear(m);
+    avsfm_reset(m);
     { extern int g_idle_skip; g_idle_skip = (cfg.idle_skip && !getenv("PC98PLAYER_NOIDLE")) ? 1 : 0; }
     m->cpu_hz = (uint32_t)cfg.cpu_mhz * 1000000u;
     if (m->cpu_hz < 1000000u) m->cpu_hz = 8000000u;
@@ -1032,7 +1031,7 @@ Machine* machine_create(const Config& cfg) {
     m->modeff[3] = 1;            // 高解像度（400 ライン）
     // 既定のデジタルパレット（0..7 がそのまま）
     for (int u = 0; u < 2; u++) { m->fd_seen[u] = floppy::change_count_unit(u); m->fd_irq_stage[u] = 0; m->fd_irq_wait[u] = 0; }
-    m->degpal[0] = 0x37; m->degpal[1] = 0x15; m->degpal[2] = 0x26; m->degpal[3] = 0x04;
+    m->dig_pal[0] = 0x37; m->dig_pal[1] = 0x15; m->dig_pal[2] = 0x26; m->dig_pal[3] = 0x04;
     for (int i = 0; i < 16; i++) {
         m->pal[i][0] = (i & 4) ? 15 : 0;   // G
         m->pal[i][1] = (i & 2) ? 15 : 0;   // R
@@ -1102,7 +1101,7 @@ void machine_state_save(Machine* m, StateW& w) {
     w.pod(m->pic); w.pod(m->pit); w.pod(m->pit_frac);
     gdc_save(w, m->gdcm); gdc_save(w, m->gdcs);
     w.pod(m->opna); w.pod(m->mouse);
-    w.pod(m->analog); w.pod(m->pal); w.pod(m->palidx); w.pod(m->degpal);
+    w.pod(m->analog); w.pod(m->pal); w.pod(m->palidx); w.pod(m->dig_pal);
     w.pod(m->disp_bank); w.pod(m->draw_bank); w.pod(m->modeff); w.pod(m->modeff2);
     w.pod(m->gfx_200); w.pod(m->gfx_200_lower); w.pod(m->gfx_color); w.pod(m->border); w.pod(m->egc_enabled);
     w.pod(m->grcg_mode); w.pod(m->grcg_tile); w.pod(m->grcg_idx);
@@ -1119,7 +1118,9 @@ void machine_state_save(Machine* m, StateW& w) {
     w.tag("MDRV"); w.pod(m->mdrv);
     w.tag("GCLK"); w.pod(m->gdc_clk5);
     w.tag("AVSD"); w.pod(m->avs);
-    w.tag("PEGC"); w.pod(m->pegc);
+    w.tag("AVSF"); w.pod(m->avsfm);
+    w.tag("PEGC"); w.pod(m->pegc); w.bytes(m->pegc_vram.data(), m->pegc_vram.size());
+    w.tag("PGCX"); w.pod(m->pegc_planar);
 }
 
 void machine_state_load(Machine* m, StateR& r) {
@@ -1161,7 +1162,7 @@ void machine_state_load(Machine* m, StateR& r) {
     r.pod(m->pic); r.pod(m->pit); r.pod(m->pit_frac);
     gdc_load(r, m->gdcm); gdc_load(r, m->gdcs);
     r.pod(m->opna); r.pod(m->mouse);
-    r.pod(m->analog); r.pod(m->pal); r.pod(m->palidx); r.pod(m->degpal);
+    r.pod(m->analog); r.pod(m->pal); r.pod(m->palidx); r.pod(m->dig_pal);
     r.pod(m->disp_bank); r.pod(m->draw_bank); r.pod(m->modeff); r.pod(m->modeff2);
     r.pod(m->gfx_200); r.pod(m->gfx_200_lower); r.pod(m->gfx_color); r.pod(m->border); r.pod(m->egc_enabled);
     if (m->gfx_200 && !(m->gdcs.csrform[0] & 0x1F)) m->gdcs.csrform[0] |= 1;   // 旧形式のステート（200 ラインをフラグだけで持っていた）
@@ -1185,7 +1186,22 @@ void machine_state_load(Machine* m, StateR& r) {
     if (r.peek_tag("MDRV")) { r.tag("MDRV"); uint16_t so = m->mdrv.stub_off, po = m->mdrv.ptr_off; r.pod(m->mdrv); m->mdrv.stub_off = so; m->mdrv.ptr_off = po; }
     if (r.peek_tag("GCLK")) { r.tag("GCLK"); r.pod(m->gdc_clk5); } else m->gdc_clk5 = 0;
     if (r.peek_tag("AVSD")) { r.tag("AVSD"); r.pod(m->avs); } else { uint8_t on = m->avs.on; avsdrv_reset(m); m->avs.on = on; }
-    if(r.peek_tag("PEGC")) { r.tag("PEGC"); r.pod(m->pegc); } else m->pegc=Pegc();
+    bool upstream_pegc = r.peek_tag("AVSF");
+    if (r.peek_tag("AVSF")) { r.tag("AVSF"); r.pod(m->avsfm); } else avsfm_reset(m);
+    pegc_clear(m);
+    if (r.peek_tag("PEGC")) {
+        r.tag("PEGC");
+        if (upstream_pegc) {
+            r.pod(m->pegc); r.bytes(m->pegc_vram.data(), m->pegc_vram.size());
+        } else { // Earlier versions of this PR stored VRAM before the registers.
+            r.bytes(m->pegc_vram.data(), m->pegc_vram.size());
+            r.pod(m->pegc.pal); r.pod(m->pegc.mmio);
+            r.pod(m->pegc_planar.source); r.pod(m->pegc_planar.pattern);
+            r.pod(m->pegc.on); r.pod(m->pegc.single); r.pod(m->pegc_planar.selector);
+            m->pegc.palidx = m->palidx;
+        }
+    }
+    if (r.peek_tag("PGCX")) { r.tag("PGCX"); r.pod(m->pegc_planar); }
     // 派生状態の作り直し
     g_addr_mask = m->a20 ? A20_ON_MASK : 0xFFFFF;
     m->regw.clear(); m->beepw.clear();

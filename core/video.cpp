@@ -13,73 +13,68 @@ static inline uint32_t rgb4(uint8_t g, uint8_t r, uint8_t b) {
 
 static const uint8_t s_blank16[16] = {0};
 
-void video_render(Machine* m, uint32_t* out) {
-    // The text overlay below is shared by the 16- and 256-color display paths.
-    if(m->pegc.enabled) {
-        uint32_t start=m->pegc.single_page?0:m->disp_bank*0x40000u;
-        uint32_t stride=(uint32_t)(m->gdcs.pitch<80?80:m->gdcs.pitch)*8;
-        for(int y=0;y<400;++y) for(int x=0;x<640;++x) {
-            uint8_t index=m->pegc.vram[(start+y*stride+x)&0x7ffff];
-            const uint8_t* p=m->pegc.palette[index];
-            out[y*640+x]=m->gdcs.display?(0xff000000u|((uint32_t)p[1]<<16)|((uint32_t)p[0]<<8)|p[2]):0xff000000u;
-        }
+int video_render(Machine* m, uint32_t* out) {
+    // PC-9821 の 256 色: グラフィックはそちらで描き、テキストだけ重ねる
+    int H = pegc_render(m, out);
+    if (H) goto text;
+    H = 400;
+    {
+    // パレット
+    uint32_t pal[16];
+    if (m->analog) {
+        for (int i = 0; i < 16; i++) pal[i] = rgb4(m->pal[i][0], m->pal[i][1], m->pal[i][2]);
     } else {
-        // パレット
-        uint32_t pal[16];
-        if (m->analog) {
-            for (int i = 0; i < 16; i++) pal[i] = rgb4(m->pal[i][0], m->pal[i][1], m->pal[i][2]);
-        } else {
-            static const int lo_idx[4] = {3, 1, 2, 0}, hi_idx[4] = {7, 5, 6, 4};
-            uint8_t dp[8];
-            for (int k = 0; k < 4; k++) { dp[lo_idx[k]] = (m->degpal[k] >> 4) & 7; dp[hi_idx[k]] = m->degpal[k] & 7; }   // 上位 4bit が #0-3、下位が #4-7
-            for (int i = 0; i < 16; i++) {
-                uint8_t v = dp[i & 7];
-                pal[i] = rgb4((v & 4) ? 15 : 0, (v & 2) ? 15 : 0, (v & 1) ? 15 : 0);
-            }
+        static const int lo_idx[4] = {3, 1, 2, 0}, hi_idx[4] = {7, 5, 6, 4};
+        uint8_t dp[8];
+        for (int k = 0; k < 4; k++) { dp[lo_idx[k]] = (m->dig_pal[k] >> 4) & 7; dp[hi_idx[k]] = m->dig_pal[k] & 7; }   // 上位 4bit が #0-3、下位が #4-7
+        for (int i = 0; i < 16; i++) {
+            uint8_t v = dp[i & 7];
+            pal[i] = rgb4((v & 4) ? 15 : 0, (v & 2) ? 15 : 0, (v & 1) ? 15 : 0);
         }
-
-        // グラフィック
-        bool gon = m->gdcs.display != 0;
-        const uint8_t (*pl)[0x8000] = m->gvram[m->disp_bank];
-        uint32_t sad1 = (uint32_t)(m->gdcs.pram[0] | (m->gdcs.pram[1] << 8) | ((m->gdcs.pram[2] & 3) << 16));
-        uint32_t len1 = (uint32_t)((m->gdcs.pram[2] >> 4) | ((m->gdcs.pram[3] & 0x3F) << 4));
-        uint32_t sad2 = (uint32_t)(m->gdcs.pram[4] | (m->gdcs.pram[5] << 8) | ((m->gdcs.pram[6] & 3) << 16));
-        int zoom = ((m->gdcs.zoom >> 4) & 15) + 1;   // ZOOM の上位 4bit が表示の倍率（下位は描画用）
-        // 1 本の VRAM の行を何本の走査線で見せるか: GDC の CSRFORM の「1 行の走査線数」（200 ライン表示は 2）、
-        // と ZOOM のうち大きいもの（BIOS・LIO の 200 ライン表示も CSRFORM で作る）
-        int rep = (m->gdcs.csrform[0] & 0x1F) + 1;
-        if (rep > 4) rep = 1;                       // グラフィックでは 1〜2 のはず。変な値は無視
-        if (zoom > rep) rep = zoom;
-        // 1 行の大きさ: GDC の PITCH（ワード数）。横に広い仮想画面を作って SAD で横スクロールするゲームがある
-        //（ヴァリアブル・ジオ 2 の対戦画面は 64 ワード = 1024 ドット幅）。表示するのは先頭の 40 ワード（640 ドット）
-        // GDC が 5MHz のときは PITCH がバイト単位（8 ドット）、2.5MHz のときはワード単位（16 ドット）
-        uint32_t stride = m->gdc_clk5 ? (uint32_t)(m->gdcs.pitch >= 80 ? m->gdcs.pitch : 80)
-                                      : (uint32_t)(m->gdcs.pitch >= 40 ? m->gdcs.pitch : 40) * 2;
-        // LEN は走査線の本数（400 ライン基準）
-        if (len1 == 0 || len1 > 400) len1 = 400;
-        for (int y = 0; y < 400; y++) {
-            uint32_t* o = out + y * 640;
-            if (!gon) { for (int x = 0; x < 640; x++) o[x] = 0xFF000000u; continue; }
-            uint32_t addr = (uint32_t)y < len1 ? (sad1 * 2 + (uint32_t)(y / rep) * stride)
-                                                : (sad2 * 2 + (uint32_t)((y - (int)len1) / rep) * stride);
-            for (int bx = 0; bx < 80; bx++) {
-                uint32_t a = (addr + bx) & 0x7FFF;
-                uint8_t b = pl[0][a], r = pl[1][a], g = pl[2][a], e = m->analog ? pl[3][a] : 0;
-                for (int k = 0; k < 8; k++) {
-                    int sh = 7 - k;
-                    int ci = ((b >> sh) & 1) | (((r >> sh) & 1) << 1) | (((g >> sh) & 1) << 2) | (((e >> sh) & 1) << 3);
-                    o[bx * 8 + k] = pal[ci];
-                }
-            }
-        }
-
     }
 
+    // グラフィック
+    bool gon = m->gdcs.display != 0;
+    const uint8_t (*pl)[0x8000] = m->gvram[m->disp_bank];
+    uint32_t sad1 = (uint32_t)(m->gdcs.pram[0] | (m->gdcs.pram[1] << 8) | ((m->gdcs.pram[2] & 3) << 16));
+    uint32_t len1 = (uint32_t)((m->gdcs.pram[2] >> 4) | ((m->gdcs.pram[3] & 0x3F) << 4));
+    uint32_t sad2 = (uint32_t)(m->gdcs.pram[4] | (m->gdcs.pram[5] << 8) | ((m->gdcs.pram[6] & 3) << 16));
+    int zoom = ((m->gdcs.zoom >> 4) & 15) + 1;   // ZOOM の上位 4bit が表示の倍率（下位は描画用）
+    // 1 本の VRAM の行を何本の走査線で見せるか: GDC の CSRFORM の「1 行の走査線数」（200 ライン表示は 2）、
+    // と ZOOM のうち大きいもの（BIOS・LIO の 200 ライン表示も CSRFORM で作る）
+    int rep = (m->gdcs.csrform[0] & 0x1F) + 1;
+    if (rep > 4) rep = 1;                       // グラフィックでは 1〜2 のはず。変な値は無視
+    if (zoom > rep) rep = zoom;
+    // 1 行の大きさ: GDC の PITCH（ワード数）。横に広い仮想画面を作って SAD で横スクロールするゲームがある
+    //（ヴァリアブル・ジオ 2 の対戦画面は 64 ワード = 1024 ドット幅）。表示するのは先頭の 40 ワード（640 ドット）
+    // GDC が 5MHz のときは PITCH がバイト単位（8 ドット）、2.5MHz のときはワード単位（16 ドット）
+    uint32_t stride = m->gdc_clk5 ? (uint32_t)(m->gdcs.pitch >= 80 ? m->gdcs.pitch : 80)
+                                  : (uint32_t)(m->gdcs.pitch >= 40 ? m->gdcs.pitch : 40) * 2;
+    // LEN は走査線の本数（400 ライン基準）
+    if (len1 == 0 || len1 > 400) len1 = 400;
+    for (int y = 0; y < 400; y++) {
+        uint32_t* o = out + y * 640;
+        if (!gon) { for (int x = 0; x < 640; x++) o[x] = 0xFF000000u; continue; }
+        uint32_t addr = (uint32_t)y < len1 ? (sad1 * 2 + (uint32_t)(y / rep) * stride)
+                                            : (sad2 * 2 + (uint32_t)((y - (int)len1) / rep) * stride);
+        for (int bx = 0; bx < 80; bx++) {
+            uint32_t a = (addr + bx) & 0x7FFF;
+            uint8_t b = pl[0][a], r = pl[1][a], g = pl[2][a], e = m->analog ? pl[3][a] : 0;
+            for (int k = 0; k < 8; k++) {
+                int sh = 7 - k;
+                int ci = ((b >> sh) & 1) | (((r >> sh) & 1) << 1) | (((g >> sh) & 1) << 2) | (((e >> sh) & 1) << 3);
+                o[bx * 8 + k] = pal[ci];
+            }
+        }
+    }
+
+    }
+text:
     // テキスト
-    if (!m->gdcm.display) return;
+    if (!m->gdcm.display) return H;
     int rowh = (m->gdcm.csrform[0] & 0x1F) + 1;
     if (rowh < 8 || rowh > 20) rowh = 16;
-    int rows = 400 / rowh;
+    int rows = H / rowh;
     bool blink_phase = (m->frame_count / 30) & 1;
     uint32_t tsad = (uint32_t)(m->gdcm.pram[0] | (m->gdcm.pram[1] << 8));
     for (int r = 0; r < rows; r++) {
@@ -134,7 +129,7 @@ void video_render(Machine* m, uint32_t* out) {
             if (!visible && !rev) continue;
             uint32_t col = 0xFF000000u | ((at & 0x40) ? 0xFF0000u : 0) | ((at & 0x80) ? 0x00FF00u : 0) | ((at & 0x20) ? 0x0000FFu : 0);
             int y0 = r * rowh;
-            for (int y = 0; y < rowh && y0 + y < 400; y++) {
+            for (int y = 0; y < rowh && y0 + y < H; y++) {
                 uint8_t bits = 0;
                 if (visible) {
                     if (semigraph) {
@@ -160,10 +155,11 @@ void video_render(Machine* m, uint32_t* out) {
             int top = m->gdcm.csrform[1] & 0x1F, bot = (m->gdcm.csrform[2] >> 3) & 0x1F;
             if (bot >= rowh) bot = rowh - 1;
             for (int y = top; y <= bot; y++) {
-                if (r * rowh + y >= 400) break;
+                if (r * rowh + y >= H) break;
                 uint32_t* o = out + (r * rowh + y) * 640 + c * 8;
                 for (int k = 0; k < 8; k++) o[k] ^= 0x00FFFFFFu;
             }
         }
     }
+    return H;
 }

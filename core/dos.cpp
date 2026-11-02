@@ -318,6 +318,10 @@ static bool split_guest(const std::string& in, std::vector<std::string>& comps, 
             if (b == "CON" || b == "NUL" || b == "AUX" || b == "PRN" || b == "CLOCK$" || b == "LPT1" || b == "COM1" || (b == "EMMXXXX0" && ems_enabled(g_m)))
                 *is_dev = true;
             if (cd_letter(g_m) && b == g_m->cfg.cd_device) *is_dev = true;   // CD-ROM の装置（MSCDEX の /D: の名前）
+            // PC-9821 のドライバ（AVSDRV.SYS・AVGDRV.SYS）は、ゲームが装置名を開こうとしたときに内蔵のものを用意する
+            //（CONFIG.SYS に書かれていなくても。AVSDRV=0 なら用意しない）
+            if (b == "AVSDRV$$" && g_m->cfg.avsdrv != 0 && !g_m->avs.on) avsdrv_install(g_m);
+            if (b == "AVGDRV$$" && !g_m->avg.on) avgdrv_install(g_m);
             if (!*is_dev && dev_chain_has(g_m, b)) *is_dev = true;          // CONFIG.SYS で組み込んだ文字装置
         }
     }
@@ -3134,6 +3138,7 @@ bool dos_set_cdrom(Machine* m, const std::string& host, const std::string& cdda_
             if (k) plog("[cd]   トラック %2d %s 先頭 %6u 長さ %6u %s\n", t, k->audio ? "音楽" : "データ", k->start, k->length, k->audio ? (k->src ? k->path.c_str() : "（音なし）") : "");
         }
     }
+    scsicd_setup(m);
     return true;
 }
 static void cd_dev_header(Machine* m) {
@@ -3150,6 +3155,9 @@ static void cd_dev_header(Machine* m) {
 }
 // CD のセクタを読む（フォルダの CD は生のセクタが無い）
 //（フォルダの CD は cdvirt が組み立てたセクタ）
+static bool cd_read_sector(uint32_t lba, uint8_t* out);
+bool dos_cd_read(uint32_t lba, uint8_t* out) { return cd_read_sector(lba, out); }
+bool dos_cd_present(Machine* m) { return cd_letter(m) != 0; }
 static bool cd_read_sector(uint32_t lba, uint8_t* out) {
     if (isofs::mounted()) return isofs::read_sector(lba, out);
     if (cdvirt::active()) return cdvirt::read_sector(lba, out);
@@ -3579,6 +3587,8 @@ void dos_init(Machine* m) {
         ww(m, N + 0, 0x0000); ww(m, N + 2, 0xF7F0);
     }
     m->avs.on = 0;
+    m->avg.on = 0;
+    scsicd_setup(m);
     if (m->cfg.avsdrv == 1) avsdrv_install(m);   // AVSDRV=1: CONFIG.SYS にかかわらず用意する
     sft_sync_guest(m);
 

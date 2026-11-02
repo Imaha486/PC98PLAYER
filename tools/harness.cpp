@@ -68,6 +68,7 @@ int main(int argc, char** argv) {
     }
     extern uint32_t g_watch_lo, g_watch_hi;
     extern int g_itr_stop_cs; if (getenv("ITRACE_STOP")) g_itr_stop_cs = (int)strtol(getenv("ITRACE_STOP"), 0, 16);
+    { extern int g_trace_full; if (getenv("TRACEFULL")) g_trace_full = atoi(getenv("TRACEFULL")); }
     extern int g_trace_int; if (getenv("TRACEINT")) g_trace_int = (int)strtol(getenv("TRACEINT"), 0, 16);
     extern int g_trace_port_lo, g_trace_port_hi; if (getenv("TRACEPORT")) sscanf(getenv("TRACEPORT"), "%x-%x", &g_trace_port_lo, &g_trace_port_hi);
     if (getenv("WATCH")) { sscanf(getenv("WATCH"), "%x-%x", &g_watch_lo, &g_watch_hi); }
@@ -108,6 +109,10 @@ int main(int argc, char** argv) {
     std::string err;
     { extern std::string g_app_dir; if (getenv("APPDIR")) g_app_dir = getenv("APPDIR"); }   // PC98PLAYER.EXE のフォルダの代わり
     if (getenv("MIDI")) ps.cfg.midi = 1;
+    { extern int g_snap_cs; extern const char* g_snap_path; if (getenv("SNAPCS")) { char* e; g_snap_cs = (int)strtol(getenv("SNAPCS"), &e, 16); g_snap_path = *e == ':' ? e + 1 : "/tmp/snap.bin"; } }
+    { extern time_t g_fixed_now; if (getenv("FIXTIME")) g_fixed_now = (time_t)atoll(getenv("FIXTIME")); }
+    { extern unsigned* g_prof_lin; if (getenv("PROFLIN")) g_prof_lin = (unsigned*)calloc(0x100000, 4); }
+    { extern FILE* g_opna_log; if (getenv("OPNALOG")) g_opna_log = fopen(getenv("OPNALOG"), "w"); }
     if (getenv("NOEMS")) ps.cfg.ems = false;
     if (getenv("NOXMS")) ps.cfg.xms_kb = 0;
     p->init(ps, &err);
@@ -158,8 +163,8 @@ int main(int argc, char** argv) {
         if (shot) {
             char fn[256]; snprintf(fn, sizeof(fn), "%s_%05d.ppm", out.c_str(), f);
             FILE* o = fopen(fn, "wb");
-            fprintf(o, "P6\n640 400\n255\n");
-            for (int i = 0; i < 640 * 400; i++) { uint32_t c = p->fb[i]; uint8_t rgb[3] = {(uint8_t)(c >> 16), (uint8_t)(c >> 8), (uint8_t)c}; fwrite(rgb, 1, 3, o); }
+            fprintf(o, "P6\n640 %d\n255\n", p->fb_h);
+            for (int i = 0; i < 640 * p->fb_h; i++) { uint32_t c = p->fb[i]; uint8_t rgb[3] = {(uint8_t)(c >> 16), (uint8_t)(c >> 8), (uint8_t)c}; fwrite(rgb, 1, 3, o); }
             fclose(o);
         }
         if (p->m->quit == 2) { fprintf(stderr, "停止: %s (frame %d)\n", p->m->status.c_str(), f); break; }
@@ -214,7 +219,17 @@ int main(int argc, char** argv) {
         for (uint32_t l = 0; o && l < cdvirt::sectors(); l++) { cdvirt::read_sector(l, sec); fwrite(sec, 1, 2048, o); }
         if (o) fclose(o);
     }
+    if (getenv("PEGCINFO")) {
+        Machine* mm = p->m; Pegc& g = mm->pegc;
+        fprintf(stderr, "[pegc] on=%d single=%d crt31=%d e0100=%02X bank=%02X,%02X gdcs.disp=%d pitch=%d clk5=%d pram=", g.on, g.single, g.crt31, g.mmio[0x100], g.mmio[4], g.mmio[6], mm->gdcs.display, mm->gdcs.pitch, mm->gdc_clk5);
+        for (int i = 0; i < 8; i++) fprintf(stderr, "%02X ", mm->gdcs.pram[i]);
+        fprintf(stderr, "\n[pegc] pal:"); for (int i = 0; i < (getenv("PALALL") ? 256 : 16); i++) fprintf(stderr, " %02X%02X%02X", g.pal[i][1], g.pal[i][0], g.pal[i][2]);
+        unsigned hist[256] = {0}; for (auto b : mm->pegc_vram) hist[b]++;
+        fprintf(stderr, "\n[pegc] vram:"); for (int i = 0; i < 256; i++) if (hist[i] > 1000) fprintf(stderr, " %02X:%u", i, hist[i]);
+        fprintf(stderr, "\n[pegc] gdcm.disp=%d text tvram[0..8]=%02X %02X attr %02X\n", mm->gdcm.display, mm->tvram[0], mm->tvram[1], mm->tvram[0x2000]);
+    }
     if (getenv("DUMPRAM")) { FILE* df = fopen(getenv("DUMPRAM"), "wb"); if (df) { fwrite(p->m->ram, 1, 0x100000, df); fclose(df); } }
+    { extern unsigned* g_prof_lin; if (g_prof_lin) { FILE* o = fopen(getenv("PROFLIN"), "wb"); fwrite(g_prof_lin, 4, 0x100000, o); fclose(o); } }
     { extern unsigned* g_prof; if (g_prof) { for (int i = 0; i < 65536; i++) if (g_prof[i]) fprintf(stderr, "%04X:%u ", i, g_prof[i]); fprintf(stderr, "\n"); } }
     if (getenv("FDLIST") && floppy::image()) {   // フロッピーの各トラックの ID と状態
         FloppyImage* im = floppy::image();

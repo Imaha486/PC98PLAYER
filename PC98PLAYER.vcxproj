@@ -54,11 +54,11 @@
   <ItemGroup>
     <ClCompile Include="core\cpu.cpp" />
     <ClCompile Include="core\avsdrv.cpp" />
+    <ClCompile Include="core\avsfm.cpp" />
     <ClCompile Include="core\machine.cpp" />
     <ClCompile Include="core\bios.cpp" />
     <ClCompile Include="core\dos.cpp" />
     <ClCompile Include="core\egc.cpp" />
-    <ClCompile Include="core\pegc.cpp" />
     <ClCompile Include="core\fontrom.cpp" />
     <ClCompile Include="core\hostfs.cpp" />
     <ClCompile Include="core\video.cpp" />
@@ -66,8 +66,11 @@
     <ClCompile Include="core\opna_renderer.cpp" />
     <ClCompile Include="core\rhythm_rom.cpp" />
     <ClCompile Include="core\xmsems.cpp" />
+    <ClCompile Include="core\pegc.cpp" />
+    <ClCompile Include="core\avgdrv.cpp" />
     <ClCompile Include="core\pcm86.cpp" />
     <ClCompile Include="core\lio.cpp" />
+    <ClCompile Include="core\scsicd.cpp" />
     <ClCompile Include="core\soundbios.cpp" />
     <ClCompile Include="core\floppy.cpp" />
     <ClCompile Include="core\fdflux.cpp" />

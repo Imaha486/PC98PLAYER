@@ -80,6 +80,8 @@ Super Depth は、ファイルを 1 つのフォルダに置いて <code>DEPTH.E
 （EXE を 1 か所に置いたまま、ショートカットで起動することもできます → <a href="#shared">1-5</a>）</p>
 
 <h3>STEP 3: 最初に実行するファイルを選ぶ</h3>
+<p>ゲームのフォルダにバッチファイル（<code>.BAT</code>）が無く、実行ファイル（<code>.EXE</code> か <code>.COM</code>。<code>PC98PLAYER.EXE</code> は数えません）が<strong>ちょうど 1 個だけ</strong>なら、選ぶ画面は出ません。そのファイルを <code>Start=</code> に書いた <code>PC98PLAYER.INI</code> を自動で作って、すぐにゲームが始まります。</p>
+<p>それ以外のとき（バッチファイルがある、実行ファイルが 2 個以上ある、など）は、次のように選びます。</p>
 <p>フォルダに設定ファイル <code>PC98PLAYER.INI</code> が無いとき（初回）は、ゲームのフォルダを開いたファイル選択の画面が出ます。
 Super Depth では <code>DEPTH.EXE</code> が最初から選ばれているので、そのまま「開く」を押します。</p>
 <figure>
@@ -407,6 +409,7 @@ Start=A:\AUTOEXEC.BAT</pre>
   <tr><td><code>EMS=</code></td><td>1</td><td>1: EMS（EMM386 相当）を用意する。書かないときは、ゲームのフォルダの CONFIG.SYS で EMM386 などに <code>NOEMS</code> が付いていれば EMS を出しません（EMS が無い前提のゲーム向け）。<code>EMS=1</code> と書けば、いつでも出します。</td></tr>
   <tr><td><code>LoadDevices=</code></td><td>1</td><td>1: 起動ドライブの CONFIG.SYS の <code>DEVICE=</code> のドライバ（MIDI・音楽のドライバなど）を組み込む。0: 組み込まない（<a href="#memory">1-10</a>）。</td></tr>
   <tr><td><code>EMSKB=</code></td><td>4096</td><td>EMS の容量（KB）。</td></tr>
+  <tr><td><code>EMSFrame=</code></td><td>D000</td><td>EMS のページフレーム（4 ページ・64KB）を置くセグメント。<code>D000</code> か <code>C000</code>。PC-9821 用のソフトには、ページフレームが C000h でないと「EMS ドライバの設定が不正です」と言って止まるものがあります。そのときは <code>C000</code> にします。フレームでないほうの 64KB にも、セグメントで指定する割り当て（INT 67h AH=50h AL=01h）でページを置けます。</td></tr>
   <tr><td><code>XMS=</code></td><td>1</td><td>1: XMS（HIMEM.SYS 相当）を用意する。</td></tr>
   <tr><td><code>XMSKB=</code></td><td>8192</td><td>XMS の容量（KB）。</td></tr>
   <tr><td><code>ExtMemMB=</code></td><td>8</td><td>拡張メモリ（1MB より上の RAM）の大きさ（MB、14 まで）。EMS/XMS を通さずに自分で保護モードへ切り替えて使うゲーム向けです（「プロテクトメモリが確保出来ません」と出るとき）。BIOS（0401h）に見せ、INT 1Fh のブロック転送でも使えます。0 で無し。</td></tr>
@@ -459,7 +462,15 @@ ExitOnEnd=0</pre>
   <li>文字装置のドライバだけを組み込みます（RAM ディスクなどのブロック装置は組み込みません）。<code>DEVICEHIGH=</code> も通常のメモリに読みます。</li>
   <li>組み込んだドライバは、装置の鎖（INT 21h AH=52h）からたどれ、名前で開くこともできます。ただし、開いた装置への読み書き・IOCTL はドライバには渡しません。</li>
   <li>MIDI のドライバ（MPU-401 用）は、<code>MIDI=1</code>（既定）で MIDI の音を出します。</li>
-  <li>PC-9821 の PCM ドライバ <code>AVSDRV.SYS</code>（MS-DOS に付いているもので、ゲームのディスクには入っていないことが多い）は、PC98PLAYER が代わりのものを持っています。CONFIG.SYS に <code>DEVICE=AVSDRV.SYS</code> があれば、ファイルが無くても組み込んだことになり、「PCM ドライバが組み込まれていません」と言われずに済みます。CONFIG.SYS が無いゲームのフォルダでは、INI に <code>AVSDRV=1</code> と書きます。</li>
+  <li>PC-9821 の PCM ドライバ <code>AVSDRV.SYS</code>（MS-DOS に付いているもので、ゲームのディスクには入っていないことが多い）は、PC98PLAYER が代わりのものを持っています。CONFIG.SYS に <code>DEVICE=AVSDRV.SYS</code> があれば、ファイルが無くても組み込んだことになり、「PCM ドライバが組み込まれていません」と言われずに済みます。CONFIG.SYS が無いゲームのフォルダでは、INI に <code>AVSDRV=1</code> と書きます。プログラムが装置 <code>AVSDRV$$</code> を開こうとしたときにも用意します（<code>AVSDRV=0</code> のときを除く）。</li>
+  <li>PC-9821 の 256 色のグラフィックドライバ <code>AVGDRV.SYS</code>（INT D8h と装置 <code>AVGDRV$$</code>）も、プログラムが <code>AVGDRV$$</code> を開こうとしたときに代わりのものを用意します。画面のモード（256 色・1 画面／2 画面）とパレットの設定に答えます。そのほかの機能は何もせずに成功を返します。</li>
+</ul>
+<h3>PC-9821 の 256 色（PEGC）</h3>
+<ul>
+  <li>PC-9821 の 256 色モード（640x400／640x480、1 ドット 1 バイトのパックドピクセル、VRAM 512KB）に対応しています。ポート 6Ah の 21h で 256 色になり、A8000h～AFFFFh と B0000h～B7FFFh の 2 つの窓（E0004h・E0006h でバンクを選ぶ）から VRAM を読み書きします。パレットは 256 色・各 8 ビットです。</li>
+  <li>ポート 09A8h で 31kHz（480 行）にしたときは、640x480 の画面を 640x400 と同じ大きさに縮めて映します（実機のモニタと同じく、どちらも画面いっぱいに映ります）。</li>
+  <li>VRAM をプレーン（16 色と同じ 4 枚）として描くモード（E0100h の bit0）と、1MB より上（F00000h～）に見せる VRAM には、まだ対応していません。</li>
+  <li>CD-ROM は、MSCDEX のほかに SCSI の CD ドライブ（ID 2、INT 1Bh）としても見せます。CD ドライブに直接 SCSI の命令を送るソフト（NEC の CD-ROM の命令で CD の音楽トラックを鳴らすものなど）も動きます。</li>
 </ul>
 <ul>
   <li>通常メモリの空きは、起動した直後でおよそ 627KB です。</li>

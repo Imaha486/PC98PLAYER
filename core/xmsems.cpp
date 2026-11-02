@@ -14,7 +14,7 @@
 #include <string>
 
 #define ROMSEG 0xF000
-static const uint16_t EMS_FRAME_SEG = 0xD000;
+static uint16_t EMS_FRAME_SEG = 0xD000;          // ページフレーム（EMSFrame= で C000h にもできる）
 static const int      EMS_PAGE = 0x4000;
 static const uint16_t EMS_DEV_SEG = 0xF7F0;     // INT 67h のベクタのセグメント（:000A に "EMMXXXX0"）
 
@@ -27,6 +27,11 @@ static bool     s_hma_used = false;
 static std::vector<EmsHandle> s_ems;           // 添字 = ハンドル（0 はシステム用）
 static uint32_t s_ems_total_pages = 0;
 static int32_t  s_frame[4][2];                 // 物理ページ -> {ハンドル, 論理ページ}（-1 = 空）
+// ページフレーム（既定 D000h-DFFFh）のほかに、もう一方の 64KB（既定 C000h-CFFFh）にも 4 ページ割り当てられる
+// （物理ページ 4-7）。AH=58h の一覧には出さない（フレームの 4 ページだけ）が、
+// セグメントで指定する AH=50h AL=01h などで C000h・C400h… を直接使うソフトがある
+static uint16_t EMS_UPPER_SEG = 0xC000;
+static int32_t  s_cframe[4][2];
 static uint16_t s_xms_entry_off = 0;
 
 static inline uint32_t lin(uint16_t s, uint16_t o) { return ((uint32_t)s << 4) + o; }
@@ -168,7 +173,19 @@ bool xms_int2f(Machine* m) {
 static EmsHandle* ems_h(uint16_t h) { return (h < s_ems.size() && s_ems[h].used) ? &s_ems[h] : nullptr; }
 static uint32_t ems_used_pages() { uint32_t u = 0; for (auto& h : s_ems) if (h.used) u += (uint32_t)(h.data.size() / EMS_PAGE); return u; }
 static uint32_t ems_free_pages() { uint32_t u = ems_used_pages(); return s_ems_total_pages > u ? s_ems_total_pages - u : 0; }
-static uint8_t* frame_ptr(Machine* m, int p) { return m->ram + lin(EMS_FRAME_SEG, 0) + p * EMS_PAGE; }
+static uint8_t* frame_ptr(Machine* m, int p) {
+    return p < 4 ? m->ram + lin(EMS_FRAME_SEG, 0) + p * EMS_PAGE : m->ram + lin(EMS_UPPER_SEG, 0) + (p - 4) * EMS_PAGE;
+}
+static int32_t* slot(int p) { return p < 4 ? s_frame[p] : s_cframe[p - 4]; }
+bool ems_upper_mapped(uint32_t a) {   // フレームの外の 64KB のこの番地に EMS のページが割り当ててあるか
+    uint32_t lo = lin(EMS_UPPER_SEG, 0);
+    if (a < lo || a >= lo + 4 * EMS_PAGE) return false;
+    return s_cframe[(a - lo) / EMS_PAGE][0] >= 0;
+}
+bool ems_frame_hit(uint32_t a) {      // ページフレームの中
+    uint32_t lo = lin(EMS_FRAME_SEG, 0);
+    return a >= lo && a < lo + 4 * EMS_PAGE;
+}
 static uint8_t* page_ptr(int h, int l) {
     if (h < 0 || (size_t)h >= s_ems.size() || !s_ems[h].used) return nullptr;
     if ((size_t)(l + 1) * EMS_PAGE > s_ems[h].data.size()) return nullptr;
@@ -176,24 +193,24 @@ static uint8_t* page_ptr(int h, int l) {
 }
 // フレームの中身を器へ書き戻す
 static void ems_flush(Machine* m, int p) {
-    uint8_t* d = page_ptr(s_frame[p][0], s_frame[p][1]);
+    uint8_t* d = page_ptr(slot(p)[0], slot(p)[1]);
     if (d) memcpy(d, frame_ptr(m, p), EMS_PAGE);
 }
-static void ems_flush_all(Machine* m) { for (int p = 0; p < 4; p++) ems_flush(m, p); }
+static void ems_flush_all(Machine* m) { for (int p = 0; p < 8; p++) ems_flush(m, p); }
 static void ems_reload_all(Machine* m) {
-    for (int p = 0; p < 4; p++) { uint8_t* d = page_ptr(s_frame[p][0], s_frame[p][1]); if (d) memcpy(frame_ptr(m, p), d, EMS_PAGE); }
+    for (int p = 0; p < 8; p++) { uint8_t* d = page_ptr(slot(p)[0], slot(p)[1]); if (d) memcpy(frame_ptr(m, p), d, EMS_PAGE); }
 }
 static uint8_t ems_map(Machine* m, int p, int h, int l) {
-    if (p < 0 || p > 3) return 0x8B;
+    if (p < 0 || p > 7) return 0x8B;
     if (l != 0xFFFF && !page_ptr(h, l)) return ems_h((uint16_t)h) ? 0x8A : 0x83;
     ems_flush_all(m);
-    if (l == 0xFFFF) { s_frame[p][0] = -1; s_frame[p][1] = -1; return 0; }
-    s_frame[p][0] = h; s_frame[p][1] = l;
+    if (l == 0xFFFF) { slot(p)[0] = -1; slot(p)[1] = -1; return 0; }
+    slot(p)[0] = h; slot(p)[1] = l;
     memcpy(frame_ptr(m, p), page_ptr(h, l), EMS_PAGE);
     return 0;
 }
 static void ems_unmap_handle(Machine* m, int h) {
-    for (int p = 0; p < 4; p++) if (s_frame[p][0] == h) { ems_flush(m, p); s_frame[p][0] = s_frame[p][1] = -1; }
+    for (int p = 0; p < 8; p++) if (slot(p)[0] == h) { ems_flush(m, p); slot(p)[0] = slot(p)[1] = -1; }
 }
 
 // 57h 用: 領域の 1 バイトずつの読み書き（通常メモリ or EMS）
@@ -308,8 +325,12 @@ static void ems_call(Machine* m) {
         uint32_t s = lin(m->cpu.sr[DS_], (uint16_t)R(m)[ESI]);
         for (int i = 0; i < CX(m); i++, s += 4) {
             uint16_t l = mem_rw(m, s), pp = mem_rw(m, s + 2);
-            int p = AL(m) == 1 ? (int)((pp - EMS_FRAME_SEG) / 0x400) : pp;
-            if (AL(m) == 1 && (pp < EMS_FRAME_SEG || ((pp - EMS_FRAME_SEG) % 0x400))) { ret(0x8B); return; }
+            int p = pp;
+            if (AL(m) == 1) {   // セグメントで指定: フレーム（既定 D000h-DC00h）は 0-3、もう一方（既定 C000h-CC00h）は 4-7
+                if (pp >= EMS_FRAME_SEG && pp < EMS_FRAME_SEG + 0x1000 && !((pp - EMS_FRAME_SEG) % 0x400)) p = (pp - EMS_FRAME_SEG) / 0x400;
+                else if (pp >= EMS_UPPER_SEG && pp < EMS_UPPER_SEG + 0x1000 && !((pp - EMS_UPPER_SEG) % 0x400)) p = 4 + (pp - EMS_UPPER_SEG) / 0x400;
+                else { ret(0x8B); return; }
+            }
             uint8_t st = ems_map(m, p, h, l);
             if (st) { ret(st); return; }
         }
@@ -322,7 +343,7 @@ static void ems_call(Machine* m) {
         if (n > cur && n - cur > ems_free_pages()) { ret(0x88); return; }
         ems_flush_all(m);
         e->data.resize((size_t)n * EMS_PAGE, 0);
-        for (int p = 0; p < 4; p++) if (s_frame[p][0] == h && s_frame[p][1] >= (int)n) s_frame[p][0] = s_frame[p][1] = -1;
+        for (int p = 0; p < 8; p++) if (slot(p)[0] == h && slot(p)[1] >= (int)n) slot(p)[0] = slot(p)[1] = -1;
         SETBX(m, (uint16_t)n); ret(0); return; }
     case 0x52: if (AL(m) == 0x00) { SETAL(m, 0); ret(0); } else if (AL(m) == 0x01) ret(0); else if (AL(m) == 0x02) { SETAL(m, 0); ret(0); } else ret(0x8F); return;
     case 0x53: {
@@ -412,7 +433,7 @@ void xmsems_init(Machine* m) {
     s_hma_used = false;
     s_ems.clear(); s_ems.resize(1); s_ems[0].used = true;   // ハンドル 0（システム用、0 ページ）
     s_ems_total_pages = m->cfg.ems ? (uint32_t)(m->cfg.ems_kb / 16) : 0;
-    for (int p = 0; p < 4; p++) s_frame[p][0] = s_frame[p][1] = -1;
+    for (int p = 0; p < 8; p++) slot(p)[0] = slot(p)[1] = -1;
     if (m->cfg.ems_from_config) plog("[ems] ゲームの CONFIG.SYS に NOEMS があるので、EMS は出しません（INI に EMS=1 と書けば出します）\n");
     // XMS の入口: F1 E0 / RETF
     {
@@ -421,6 +442,10 @@ void xmsems_init(Machine* m) {
         s_xms_entry_off = o;
     }
     // INT 67h: ベクタのセグメントの 000Ah に装置名、0012h に入口
+    EMS_FRAME_SEG = m->cfg.ems_frame == 0xC000 ? 0xC000 : 0xD000;
+    EMS_UPPER_SEG = EMS_FRAME_SEG == 0xC000 ? 0xD000 : 0xC000;
+    if (m->cfg.ems && EMS_FRAME_SEG == 0xC000 && m->cfg.sound_bios)
+        plog("[ems] ページフレームを C000h にしたので、CC00h のサウンド BIOS の ROM はフレームと重なります（EMS を優先）\n");
     if (m->cfg.ems) {
         uint32_t b = lin(EMS_DEV_SEG, 0);
         memset(m->ram + b, 0, 0x20);
@@ -444,12 +469,13 @@ void xmsems_state_save(Machine* m, StateW& w) {
     w.u32((uint32_t)s_ems.size());
     for (auto& h : s_ems) { w.pod(h.used); w.bytes(h.name, 8); w.bytes(h.saved, sizeof(h.saved)); w.pod(h.has_saved); w.u32((uint32_t)h.data.size()); if (!h.data.empty()) w.bytes(h.data.data(), h.data.size()); }
     w.bytes(s_frame, sizeof(s_frame));
+    w.tag("EMSC"); w.bytes(s_cframe, sizeof(s_cframe));
 }
 void xmsems_state_load(Machine* m, StateR& r) {
     if (!r.peek_tag("XMEM")) {         // 旧形式のステートには無い: 空にしておく
         s_xms.assign(1, XmsBlock()); s_hma_used = false;
         s_ems.assign(1, EmsHandle()); s_ems[0].used = true;
-        for (int p = 0; p < 4; p++) s_frame[p][0] = s_frame[p][1] = -1;
+        for (int p = 0; p < 8; p++) slot(p)[0] = slot(p)[1] = -1;
         (void)m; return;
     }
     r.tag("XMEM");
@@ -461,5 +487,7 @@ void xmsems_state_load(Machine* m, StateR& r) {
     s_ems.assign(n, EmsHandle());
     for (auto& h : s_ems) { r.pod(h.used); r.bytes(h.name, 8); r.bytes(h.saved, sizeof(h.saved)); r.pod(h.has_saved); uint32_t sz = r.u32(); if (sz > 0x10000000u) { r.ok = false; return; } h.data.resize(sz); if (sz) r.bytes(h.data.data(), sz); }
     r.bytes(s_frame, sizeof(s_frame));
+    if (r.peek_tag("EMSC")) { r.tag("EMSC"); r.bytes(s_cframe, sizeof(s_cframe)); }
+    else for (int p = 0; p < 4; p++) s_cframe[p][0] = s_cframe[p][1] = -1;
     // フレームの中身は RAM ごと復元済み
 }
