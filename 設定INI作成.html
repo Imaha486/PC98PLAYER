@@ -124,6 +124,7 @@ const SCHEMA = [
     { key: "FreeSpaceMB", label: "空き容量", type: "number", def: "96", min: 1, max: 1000, unit: "MB", help: "大きすぎると「空きが足りない」と言うソフトがあります。" },
   ]},
   { title: "画面", items: [
+    { key: "VideoColors", label: "グラフィック色数", type: "select", def: "16", options: [["16","16色（従来の動作）"],["256","256色（PC-9821拡張グラフィック）"]], help: "256色対応タイトル用。BIOS ROM不要。640×400の基本機能に対応。" },
     { key: "Scale", label: "表示倍率", type: "radio", def: "2", options: [["1","x1"],["2","x2"],["3","x3"],["4","x4"],["5","x5"],["6","x6"]], help: "x1 で 640×400。" },
     { key: "FullScreen", label: "フルスクリーン", type: "check", def: "0", on: "1", off: "0", text: "フルスクリーンを有効にする", help: "起動したときから全画面。" },
     { key: "Smooth", label: "なめらかに拡大", type: "check", def: "0", on: "1", off: "0", text: "拡大をなめらかにする", help: "外すとドットのまま。" },

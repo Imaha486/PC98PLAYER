@@ -20,6 +20,8 @@ static const uint32_t VRAM_SIZE = 0x80000;
 void pegc_clear(Machine* m) {
     memset(&m->pegc, 0, sizeof(m->pegc));
     m->pegc_vram.assign(VRAM_SIZE, 0);
+    m->pegc_planar = PegcPlanar();
+    m->pegc.mmio[0x10c] = m->pegc.mmio[0x10d] = 0xff;
 }
 
 static inline uint32_t bank_base(Machine* m, int w) {
@@ -28,6 +30,7 @@ static inline uint32_t bank_base(Machine* m, int w) {
 }
 
 bool pegc_io_out(Machine* m, uint16_t port, uint8_t v) {
+    if (m->cfg.video_colors != 256) return false;
     Pegc& p = m->pegc;
     switch (port) {
     case 0x6A:
@@ -39,6 +42,7 @@ bool pegc_io_out(Machine* m, uint16_t port, uint8_t v) {
         }
         if (v == 0x68 || v == 0x69) { p.single = v & 1; return true; }
         return false;
+    case 0x9A0: m->pegc_planar.selector = v; return true;
     case 0x9A8: p.crt31 = v & 1; return true;
     case 0xA8: if (!p.on) return false; p.palidx = v; return true;
     case 0xAA: if (!p.on) return false; p.pal[p.palidx][0] = v; return true;
@@ -49,8 +53,12 @@ bool pegc_io_out(Machine* m, uint16_t port, uint8_t v) {
 }
 
 bool pegc_io_in(Machine* m, uint16_t port, uint8_t* v) {
+    if (m->cfg.video_colors != 256) return false;
     Pegc& p = m->pegc;
     switch (port) {
+    case 0x9A0:
+        if (m->pegc_planar.selector != 0x10) return false;
+        *v = p.on; return true;
     case 0x9A8: *v = p.crt31; return true;
     case 0xA8: if (!p.on) return false; *v = p.palidx; return true;
     case 0xAA: if (!p.on) return false; *v = p.pal[p.palidx][0]; return true;
@@ -60,17 +68,11 @@ bool pegc_io_in(Machine* m, uint16_t port, uint8_t* v) {
     return false;
 }
 
-static void plane_warn(Machine* m) {
-    static int n = 0;
-    if (n++ < 4) plog("[pegc] プレーンモード（E0100h bit0=1）の描画にはまだ対応していません\n");
-    (void)m;
-}
-
 bool pegc_mem_rb(Machine* m, uint32_t a, uint8_t* v) {
     Pegc& p = m->pegc;
     if (!p.on) return false;
     if (a >= 0xA8000 && a < 0xB8000) {
-        if (p.mmio[0x100] & 1) { plane_warn(m); *v = 0xFF; return true; }
+        if (p.mmio[0x100] & 1) { *v = (uint8_t)pegc_read(m, a, 1); return true; }
         int w = a >= 0xB0000;
         *v = m->pegc_vram[(bank_base(m, w) + (a & 0x7FFF)) & (VRAM_SIZE - 1)];
         return true;
@@ -88,7 +90,7 @@ bool pegc_mem_wb(Machine* m, uint32_t a, uint8_t v) {
     Pegc& p = m->pegc;
     if (!p.on) return false;
     if (a >= 0xA8000 && a < 0xB8000) {
-        if (p.mmio[0x100] & 1) { plane_warn(m); return true; }
+        if (p.mmio[0x100] & 1) { pegc_write(m, a, v, 1); return true; }
         int w = a >= 0xB0000;
         m->pegc_vram[(bank_base(m, w) + (a & 0x7FFF)) & (VRAM_SIZE - 1)] = v;
         return true;
@@ -138,4 +140,52 @@ int pegc_render(Machine* m, uint32_t* out) {
     }
     for (; y < H; y++) for (int x = 0; x < 640; x++) out[y * 640 + x] = 0xFF000000u;
     return H;
+}
+
+static uint16_t reg(const Pegc& p,int offset) { return p.mmio[offset] | (p.mmio[offset+1]<<8); }
+bool pegc_window(Machine* m,uint32_t a) { return m->cfg.video_colors==256 && m->pegc.on && a>=0xA8000 && a<0xB8000; }
+static uint32_t pixel_base(Machine* m,uint32_t a) {
+    return (((a-0xA8000)*8)+(m->pegc.single?0:m->draw_bank*0x40000))&0x7ffff;
+}
+static int bit_index(int pixel) { return (pixel&~7)+(7-(pixel&7)); }
+uint16_t pegc_read(Machine* m,uint32_t a,int bytes) {
+    Pegc& p=m->pegc;uint16_t value=0;
+    if(!(p.mmio[0x100]&1)) {
+        for(int i=0;i<bytes;++i) { uint32_t off=a+i-0xA8000;uint32_t bank=p.mmio[(off<0x8000)?4:6]&15;value|=m->pegc_vram[bank*0x8000+(off&0x7fff)]<<(8*i); }
+        return value;
+    }
+    if(!p.single && a>=0xB0000) return 0xffff;
+    uint32_t base=pixel_base(m,a);uint16_t rop=reg(p,0x108);uint8_t planes=(uint8_t)~p.mmio[0x104];
+    for(int i=0;i<bytes*8;++i) {
+        uint8_t color=m->pegc_vram[(base+i)&0x7ffff];m->pegc_planar.source[i]=color;
+        if((rop&0x2000) && !(rop&0x0100)) m->pegc_planar.pattern[i]=color;
+        if((p.mmio[0x10a]&1) && !(rop&0x0100) && !((color^p.mmio[0x114])&planes)) value|=(uint16_t)(1u<<bit_index(i));
+    }
+    return value;
+}
+void pegc_write(Machine* m,uint32_t a,uint16_t value,int bytes) {
+    Pegc& p=m->pegc;
+    if(!(p.mmio[0x100]&1)) {
+        for(int i=0;i<bytes;++i) { uint32_t off=a+i-0xA8000;uint32_t bank=p.mmio[(off<0x8000)?4:6]&15;m->pegc_vram[bank*0x8000+(off&0x7fff)]=(uint8_t)(value>>(8*i)); }
+        return;
+    }
+    if(!p.single && a>=0xB0000) return;
+    uint32_t base=pixel_base(m,a);uint16_t rop=reg(p,0x108),mask=reg(p,0x10c);uint8_t planes=(uint8_t)~p.mmio[0x104];
+    int read_shift=reg(p,0x112)&15,write_shift=(reg(p,0x112)>>8)&15;
+    for(int i=0;i<bytes*8;++i) {
+        if(!(mask&(1u<<bit_index(i)))) continue;
+        uint8_t& destination=m->pegc_vram[(base+i)&0x7ffff];uint8_t result=0;
+        bool cpu_bit=(value&(1u<<bit_index(i)))!=0;
+        int shift=i+read_shift-write_shift;uint8_t source=(rop&0x100)?(cpu_bit?255:0):m->pegc_planar.source[(shift+32)&31];
+        if(!(rop&0x1000)) result=source?255:0;
+        else {
+            int mode=(rop>>10)&3;uint8_t pattern=mode==0?m->pegc_planar.pattern[i]:mode==1?p.mmio[0x118]:p.mmio[0x114];
+            for(int bit=0;bit<8;++bit) {
+                int index=(((source>>bit)&1)<<2)|(((destination>>bit)&1)<<1)|((pattern>>bit)&1);
+                if(mode==3) index=(((source>>bit)&1)<<2)|(((p.mmio[0x114]>>bit)&1)<<1)|((p.mmio[0x118]>>bit)&1);
+                result|=((rop>>index)&1)<<bit;
+            }
+        }
+        destination=(destination&~planes)|(result&planes);
+    }
 }

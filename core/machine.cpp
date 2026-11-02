@@ -593,6 +593,7 @@ void mem_wb_slow(Machine* m, uint32_t a, uint8_t v) {
 }
 uint16_t mem_rw_slow(Machine* m, uint32_t a) {
     g_side_fx++;
+    if (pegc_window(m, a & g_addr_mask) && pegc_window(m, (a + 1) & g_addr_mask)) return pegc_read(m, a & g_addr_mask, 2);
     uint32_t b = a & g_addr_mask;
     if (!m->pegc.on && egc_on(m)) {
         uint32_t off, off2;
@@ -602,6 +603,7 @@ uint16_t mem_rw_slow(Machine* m, uint32_t a) {
     return (uint16_t)(mem_rb(m, a) | (mem_rb(m, a + 1) << 8));
 }
 void mem_ww_slow(Machine* m, uint32_t a, uint16_t v) {
+    if (pegc_window(m, a & g_addr_mask) && pegc_window(m, (a + 1) & g_addr_mask)) { pegc_write(m, a & g_addr_mask, v, 2); return; }
     uint32_t b = a & g_addr_mask;
     if (b + 1 >= g_watch_lo && b < g_watch_hi) plog("[w] %05X <- %04X (w) @%04X:%04X\n", b, v, m->cpu.op_cs, m->cpu.op_ip);
     if (!m->pegc.on && egc_on(m)) {
@@ -666,7 +668,7 @@ uint8_t io_in8(Machine* m, uint16_t port) {
     return v;
 }
 uint8_t io_in8_(Machine* m, uint16_t port) {
-    { uint8_t pv; if ((port == 0x9A8 || (port >= 0xA8 && port <= 0xAE)) && pegc_io_in(m, port, &pv)) return pv; }
+    { uint8_t pv; if ((port == 0x9A0 || port == 0x9A8 || (port >= 0xA8 && port <= 0xAE)) && pegc_io_in(m, port, &pv)) return pv; }
     switch (port) {
     case 0x00: return pic_read(m, 0, 0);
     case 0x02: return pic_read(m, 0, 1);
@@ -735,7 +737,7 @@ void io_out8(Machine* m, uint16_t port, uint8_t v) {
     g_side_fx++;
     if (g_dbg_on) dbg_note_io(m, port, v, true, false);
     if (port >= g_trace_port_lo && port <= g_trace_port_hi && s_port_log++ < 3000) plog("[out] %04X <- %02X @%04X:%04X\n", port, v, m->cpu.op_cs, m->cpu.op_ip);
-    if ((port == 0x6A || port == 0x9A8 || (port >= 0xA8 && port <= 0xAE)) && pegc_io_out(m, port, v)) return;   // PC-9821 の 256 色
+    if ((port == 0x6A || port == 0x9A0 || port == 0x9A8 || (port >= 0xA8 && port <= 0xAE)) && pegc_io_out(m, port, v)) return;   // PC-9821 の 256 色
     switch (port) {
     case 0x00: pic_write(m, 0, 0, v); return;
     case 0x02: pic_write(m, 0, 1, v); return;
@@ -1118,6 +1120,7 @@ void machine_state_save(Machine* m, StateW& w) {
     w.tag("AVSD"); w.pod(m->avs);
     w.tag("AVSF"); w.pod(m->avsfm);
     w.tag("PEGC"); w.pod(m->pegc); w.bytes(m->pegc_vram.data(), m->pegc_vram.size());
+    w.tag("PGCX"); w.pod(m->pegc_planar);
 }
 
 void machine_state_load(Machine* m, StateR& r) {
@@ -1183,8 +1186,22 @@ void machine_state_load(Machine* m, StateR& r) {
     if (r.peek_tag("MDRV")) { r.tag("MDRV"); uint16_t so = m->mdrv.stub_off, po = m->mdrv.ptr_off; r.pod(m->mdrv); m->mdrv.stub_off = so; m->mdrv.ptr_off = po; }
     if (r.peek_tag("GCLK")) { r.tag("GCLK"); r.pod(m->gdc_clk5); } else m->gdc_clk5 = 0;
     if (r.peek_tag("AVSD")) { r.tag("AVSD"); r.pod(m->avs); } else { uint8_t on = m->avs.on; avsdrv_reset(m); m->avs.on = on; }
+    bool upstream_pegc = r.peek_tag("AVSF");
     if (r.peek_tag("AVSF")) { r.tag("AVSF"); r.pod(m->avsfm); } else avsfm_reset(m);
-    if (r.peek_tag("PEGC")) { r.tag("PEGC"); r.pod(m->pegc); m->pegc_vram.resize(0x80000); r.bytes(m->pegc_vram.data(), m->pegc_vram.size()); } else pegc_clear(m);
+    pegc_clear(m);
+    if (r.peek_tag("PEGC")) {
+        r.tag("PEGC");
+        if (upstream_pegc) {
+            r.pod(m->pegc); r.bytes(m->pegc_vram.data(), m->pegc_vram.size());
+        } else { // Earlier versions of this PR stored VRAM before the registers.
+            r.bytes(m->pegc_vram.data(), m->pegc_vram.size());
+            r.pod(m->pegc.pal); r.pod(m->pegc.mmio);
+            r.pod(m->pegc_planar.source); r.pod(m->pegc_planar.pattern);
+            r.pod(m->pegc.on); r.pod(m->pegc.single); r.pod(m->pegc_planar.selector);
+            m->pegc.palidx = m->palidx;
+        }
+    }
+    if (r.peek_tag("PGCX")) { r.tag("PGCX"); r.pod(m->pegc_planar); }
     // 派生状態の作り直し
     g_addr_mask = m->a20 ? A20_ON_MASK : 0xFFFFF;
     m->regw.clear(); m->beepw.clear();

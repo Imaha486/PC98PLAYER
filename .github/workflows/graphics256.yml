@@ -1,0 +1,21 @@
+name: Windows build and graphics regression
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the existing optional ymfm dependency
+        run: git clone --depth 1 https://github.com/aaronsgiles/ymfm.git third_party/ymfm
+      - name: Configure Windows application
+        run: cmake -S . -B build/windows -A x64
+      - name: Build Windows application
+        run: cmake --build build/windows --config Release --parallel
+      - name: Configure graphics tests
+        run: cmake -S tests -B build/graphics-tests -A x64
+      - name: Build graphics tests
+        run: cmake --build build/graphics-tests --config Release --parallel
+      - name: Test BIOS-free 256-color graphics
+        run: ctest --test-dir build/graphics-tests -C Release --output-on-failure

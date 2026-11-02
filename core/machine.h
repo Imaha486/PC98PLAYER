@@ -14,6 +14,7 @@
 #include <vector>
 #include <string>
 #include "cpu.h"
+#include "pegc.h"
 #include "memio.h"
 
 // ---- 時間軸 ------------------------------------------------------------------
@@ -194,6 +195,7 @@ struct Config {
     std::string args;
     char     drive = 'A';
     int      cpu_mhz = 16;
+    int      video_colors = 16;    // Explicit opt-in for extended graphics
     int      gdc_5mhz = 0;          // DIP SW 2-8: グラフィック GDC を 5MHz で使える（0 = 2.5MHz の機械）
     int      sound_irq = 12;     // 既定は PC-9801-86 の INT5
     int      sound_board = 86;   // 86 / 26 / 0
@@ -303,6 +305,7 @@ struct Machine {
     AvgDrv   avg;
     AvsFm    avsfm;
     Pegc     pegc;
+    PegcPlanar pegc_planar;
     std::vector<uint8_t> pegc_vram;  // 256 色の VRAM（512KB）
     Config   cfg;
 

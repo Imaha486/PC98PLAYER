@@ -126,6 +126,7 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
         for (auto& c : g) c = (char)toupper((unsigned char)c);
         ps->cfg.gdc_5mhz = (g == "5" || g == "5MHZ" || g == "5.0") ? 1 : 0;
     }
+    ps->cfg.video_colors = I("VIDEOCOLORS",16)==256?256:16;
     ps->cfg.sound_board = I("SOUNDBOARD", 86);
     ps->cfg.sound_bios = I("SOUNDBIOS", 0) != 0;
     ps->cfg.sound_irq = I("SOUNDIRQ", 12);
