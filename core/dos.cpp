@@ -3266,7 +3266,7 @@ static void mscdex(Machine* m) {
         uint32_t key = ((uint32_t)al << 16) | ((uint32_t)cmd << 8) | code;
         if (key == last) {
             rep++;
-            if ((rep & (rep - 1)) == 0 && rep >= 4 && k < 4000) { k++; plog("[cd]   （同じ要求が %u 回続いています）\n", rep); }
+            if ((rep & (rep - 1)) == 0 && rep >= 4 && k < 4000) { k++; plog("[cd]   （INT 2Fh の同じ要求が %u 回続いています）\n", rep); }
         } else {
             last = key; rep = 1;
             if (k < 4000) { k++;
@@ -3342,7 +3342,7 @@ static void cd_request(Machine* m, uint32_t q, bool drv_ok) {
         uint8_t cmd = mem_rb(m, q + 2);
         uint16_t st = 0x0100;   // 完了
         if (!drv_ok) st = 0x8101;   // 不明なユニット
-        else if (cmd == 3) st = cd_ioctl_input(m, lin(rw(m, q + 0x10), rw(m, q + 0x0E)));
+        else if (cmd == 3) { st = cd_ioctl_input(m, lin(rw(m, q + 0x10), rw(m, q + 0x0E))); machine_driver_wait(m, 1000); }   // ドライブへの問い合わせ: 約 1ms
         else if (cmd == 12) st = cd_ioctl_output(m, lin(rw(m, q + 0x10), rw(m, q + 0x0E)));
         else if (cmd == 128) {   // 読み出し（long）
             uint8_t mode = mem_rb(m, q + 0x0D);
@@ -3377,8 +3377,13 @@ static uint32_t s_cd_reqhdr = 0;
 static void cd_strategy(Machine* m) { s_cd_reqhdr = lin(ES(m), BX(m)); }
 static void cd_interrupt(Machine* m) {
     if (!s_cd_reqhdr) return;
-    if (m->cfg.trace) { static int k = 0; if (k++ < 200) { uint8_t cmd = mem_rb(m, s_cd_reqhdr + 2); uint8_t code = (cmd == 3 || cmd == 12) ? mem_rb(m, lin(rw(m, s_cd_reqhdr + 0x10), rw(m, s_cd_reqhdr + 0x0E))) : 0;
-        plog("[cd] 装置への直接の要求 %u（コード %u）\n", cmd, code); } }
+    if (m->cfg.trace) {   // 同じ要求が続くときは回数だけ（1・2・4・8… 回目）を書く
+        static int k = 0; static uint32_t last = 0xFFFFFFFF, rep = 0;
+        uint8_t cmd = mem_rb(m, s_cd_reqhdr + 2); uint8_t code = (cmd == 3 || cmd == 12) ? mem_rb(m, lin(rw(m, s_cd_reqhdr + 0x10), rw(m, s_cd_reqhdr + 0x0E))) : 0;
+        uint32_t key = ((uint32_t)cmd << 8) | code;
+        if (key == last) { rep++; if ((rep & (rep - 1)) == 0 && rep >= 4 && k < 4000) { k++; plog("[cd]   （装置への同じ要求が %u 回続いています）\n", rep); } }
+        else { last = key; rep = 1; if (k < 4000) { k++; plog("[cd] 装置への直接の要求 %u（コード %u）\n", cmd, code); } }
+    }
     cd_request(m, s_cd_reqhdr, cd_letter(m) != 0);
 }
 

@@ -18,10 +18,11 @@ int main() {
         check(player_settings_from_ini(ini,".",&settings) && settings.cfg.video_colors==16,"invalid color setting falls back to legacy behavior");
         Config cfg;cfg.video_colors=256;cfg.midi=0;m=machine_create(cfg);
         check(m->ram[0x45c]&0x40,"HLE reports extended graphics without a ROM");
+        check(mem_rb(m,0xf8e80)==0x98 && mem_rb(m,0xf8e81)==0x21 && (m->ram[0x597]&4),"PC-9821 ROM and CRT BIOS identity");
         check(!m->pegc.on,"16-color mode remains the reset mode");
         // Later AGS_9821 drivers use INT18/4D rather than writing port 6A.
         m->cpu.r[EAX]=0x4d00;m->cpu.r[ECX]=0x0100;bios_hle(m,HLE_INT18);
-        check(m->pegc.on,"INT18/4D CH=1 enables the same extended framebuffer as port 6A");
+        check(m->pegc.on && (m->ram[0x54d]&0x80),"INT18/4D CH=1 enables the same extended framebuffer as port 6A");
         io_out8(m,0xa8,200);io_out8(m,0xaa,0x12);io_out8(m,0xac,0x34);io_out8(m,0xae,0x56);
         mem_wb(m,0xa8000,200);m->gdcs.display=1;m->gdcm.display=0;m->gdcs.pitch=80;m->gdc_clk5=1;
         std::vector<uint32_t> biosPixels(640*400);video_render(m,biosPixels.data());
@@ -39,6 +40,12 @@ int main() {
         mem_ww(m,0xa8000,0xabcd);mem_ww(m,0xb0000,0x1234);
         check(m->pegc_vram[15*0x8000]==0xcd && m->pegc_vram[3*0x8000]==0x34,"independent 32K VRAM windows");
         check(mem_rw(m,0xa8000)==0xabcd && mem_rw(m,0xb0000)==0x1234,"banked VRAM reads");
+        io_out8(m,0xf2,0);
+        check(mem_rb(m,0xf78000)==0xff,"linear VRAM stays hidden until E0102h enables it");
+        mem_wb(m,0xe0102,1);
+        check(mem_rw(m,0xf78000)==0xabcd && mem_rb(m,0xf18000)==0x34,"linear VRAM at F00000h");
+        mem_ww(m,0xf00010,0x4321);check(m->pegc_vram[0x10]==0x21 && m->pegc_vram[0x11]==0x43,"linear VRAM writes");
+        m->pegc_vram[0x10]=m->pegc_vram[0x11]=0;mem_wb(m,0xe0102,0);
         mem_ww(m,0xe0006,0);mem_ww(m,0xaffff,0x9876);
         check(m->pegc_vram[0x7ffff]==0x76 && m->pegc_vram[0]==0x98,"word access crosses window boundary correctly");
         for(int i=0;i<256;++i) {io_out8(m,0xa8,(uint8_t)i);io_out8(m,0xaa,(uint8_t)i);io_out8(m,0xac,(uint8_t)i);io_out8(m,0xae,(uint8_t)i);}

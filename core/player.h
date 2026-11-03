@@ -87,6 +87,7 @@ struct Player {
     bool restore(const uint8_t* data, size_t len);
     // render_audio=false: 音を合成しない（早送り用。レジスタへの書き込みだけ音源へ渡す）
     void run_frame(bool render_video = true, bool render_audio = true);
+    double perf_cpu_ms = 0, perf_audio_ms = 0;   // 直前の run_frame の内訳（CPU と周辺 / 音の合成）
     void shutdown();
     // PC-98 を起動し直す（電源を入れ直したのと同じ。入っているフロッピーはそのまま）
     bool reboot(std::string* err);

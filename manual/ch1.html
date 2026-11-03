@@ -355,7 +355,7 @@ Start=A:\AUTOEXEC.BAT</pre>
 <table>
   <tr><th>項目</th><th>既定値</th><th>説明</th></tr>
   <tr><td><code>CpuMHz=</code></td><td>16</td><td>仮想 CPU の速さ（MHz 相当）。命令の重さは 386 程度で数えているため、i486DX2（66MHz）推奨のソフトは 100〜133 くらいが目安です。上げるほどパソコン側の負荷が増えます。</td></tr>
-  <tr><td><code>IdleSkip=</code></td><td>1</td><td>1: ゲームが割込みを待って同じところを回っているだけのとき、その間の命令を実行せずに待つ（結果は変わらず、早送りが速くなり、パソコンの負荷も下がります）。0: しない（おかしな動きをするときの確認用）。</td></tr>
+  <tr><td><code>IdleSkip=</code></td><td>1</td><td>1: ゲームが割込みや画面の同期（GDC のステータス）を待って同じところを回っているだけのとき、その間の命令を実行せずに待つ（結果は変わらず、早送りが速くなり、パソコンの負荷も下がります）。0: しない（おかしな動きをするときの確認用）。</td></tr>
   <tr><td><code>MouseSpeed=</code></td><td>100</td><td>マウスの速さ（%）。</td></tr>
   <tr><td><code>MouseDriver=</code></td><td>1</td><td>1: マウスドライバ（MOUSE.COM 相当）を用意する。0: 用意しない。</td></tr>
   <tr><td><code>KeyRepeat=</code></td><td>1</td><td>0 にするとキーの押しっぱなしで連打を送らない。</td></tr>
@@ -409,7 +409,7 @@ Start=A:\AUTOEXEC.BAT</pre>
   <tr><td><code>EMS=</code></td><td>1</td><td>1: EMS（EMM386 相当）を用意する。書かないときは、ゲームのフォルダの CONFIG.SYS で EMM386 などに <code>NOEMS</code> が付いていれば EMS を出しません（EMS が無い前提のゲーム向け）。<code>EMS=1</code> と書けば、いつでも出します。</td></tr>
   <tr><td><code>LoadDevices=</code></td><td>1</td><td>1: 起動ドライブの CONFIG.SYS の <code>DEVICE=</code> のドライバ（MIDI・音楽のドライバなど）を組み込む。0: 組み込まない（<a href="#memory">1-10</a>）。</td></tr>
   <tr><td><code>EMSKB=</code></td><td>4096</td><td>EMS の容量（KB）。</td></tr>
-  <tr><td><code>PC9821=</code></td><td>（尋ねる）</td><td>1: PC-9821 として見せる（BIOS のワークエリア 045Ch の bit6 = 256 色のグラフィックあり）。0: PC-9801 として見せる（256 色のグラフィックは無い）。PC-9821 かどうかを調べて、PC-9821 なら 256 色で動く・PC-9821 でないと「PC-9821 ではない」と言って止まるソフト向けです。<br>書いていないときは、ソフトが PC-9821 かどうかを調べた（045Ch を読んだ・ポート 09A0h を使った・256 色に切り替えようとした）ところで「PC-9821 として動かしますか？」と尋ね、答えを INI に <code>PC9821=1</code> / <code>PC9821=0</code> と書きます。「はい」と答えると、ソフトはそのまま PC-9821 として動き続けます（起動し直しは要りません）。次からは尋ねません。<code>VideoColors=256</code> と書いても <code>PC9821=1</code> と同じです。</td></tr>
+  <tr><td><code>PC9821=</code></td><td>（尋ねる）</td><td>1: PC-9821 として見せる（BIOS のワークエリア 045Ch の bit6 = 256 色のグラフィックあり、ROM の機種の印 など）。0: PC-9801 として見せる（256 色のグラフィックは無い）。PC-9821 かどうかを調べて、PC-9821 なら 256 色で動く・PC-9821 でないと「PC-9821 ではない」と言って止まるソフト向けです。<br>書いていないときは、ソフトが PC-9821 かどうかを調べた（045Ch を読んだ・ROM の機種の印を読んだ・ポート 09A0h を使った・256 色に切り替えようとした）ところで「PC-9821 として動かしますか？」と尋ね、答えを INI に <code>PC9821=1</code> / <code>PC9821=0</code> と書きます。「はい」と答えると、ソフトはそのまま PC-9821 として動き続けます（起動し直しは要りません）。次からは尋ねません。<code>VideoColors=256</code> と書いても <code>PC9821=1</code> と同じです。</td></tr>
   <tr><td><code>EMSFrame=</code></td><td>D000</td><td>EMS のページフレーム（4 ページ・64KB）を置くセグメント。<code>D000</code> か <code>C000</code>。PC-9821 用のソフトには、ページフレームが C000h でないと「EMS ドライバの設定が不正です」と言って止まるものがあります。そのときは <code>C000</code> にします。フレームでないほうの 64KB にも、セグメントで指定する割り当て（INT 67h AH=50h AL=01h）でページを置けます。</td></tr>
   <tr><td><code>XMS=</code></td><td>1</td><td>1: XMS（HIMEM.SYS 相当）を用意する。</td></tr>
   <tr><td><code>XMSKB=</code></td><td>8192</td><td>XMS の容量（KB）。</td></tr>
@@ -474,7 +474,7 @@ ExitOnEnd=0</pre>
   <li>VRAM をプレーンとして描くモード（E0100h の bit0）にも対応しています。1 バイトが 8 ドットで、ROP（E0108h）・ビットマスク（E010Ch）・書き込み禁止のプレーン（E0104h）・色の比較（E010Ah・E0114h）・ずらし（E0112h）を使えます。</li>
   <li>BIOS の INT 18h AH=4Dh（CH=0 で 16 色、CH=1 で 256 色）にも答えます。</li>
   <li>256 色が使えるのは PC-9821 として動かしているとき（<code>PC9821=1</code>）だけです。<code>PC9821=0</code> では、実機の PC-9801 と同じく 256 色に切り替わりません。INI に書いていないときは、ソフトが 256 色を使おうとしたところで尋ねます。</li>
-  <li>1MB より上（F00000h～）に見せる VRAM には、まだ対応していません。</li>
+  <li>1MB より上（F00000h～F7FFFFh）に VRAM 全体を見せる使い方（E0102h の bit0）にも対応しています。保護モードで VRAM を直接読み書きするソフト向けです。</li>
   <li>CD-ROM は、MSCDEX のほかに SCSI の CD ドライブ（ID 2、INT 1Bh）としても見せます。CD ドライブに直接 SCSI の命令を送るソフト（NEC の CD-ROM の命令で CD の音楽トラックを鳴らすものなど）も動きます。</li>
 </ul>
 <ul>

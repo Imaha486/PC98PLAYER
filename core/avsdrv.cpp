@@ -33,7 +33,14 @@ static inline uint32_t lin(uint16_t s, uint16_t o) { return ((uint32_t)s << 4) +
 static inline uint8_t rb(Machine* m, uint32_t a) { return m->ram[a & 0xFFFFF]; }
 static inline uint16_t rw(Machine* m, uint32_t a) { return (uint16_t)(rb(m, a) | (rb(m, a + 1) << 8)); }
 static inline uint32_t rd(Machine* m, uint32_t a) { return rw(m, a) | ((uint32_t)rw(m, a + 2) << 16); }
-static inline void wb(Machine* m, uint32_t a, uint8_t v) { if ((a & 0xFFFFF) < 0xA0000) m->ram[a & 0xFFFFF] = v; }
+// ゲームのメモリ（記述子の状態・進み）を書く。値が変わったら、それを待って空回りで止めていた CPU を起こす
+static inline void wb(Machine* m, uint32_t a, uint8_t v) {
+    a &= 0xFFFFF;
+    if (a >= 0xA0000 || m->ram[a] == v) return;
+    m->ram[a] = v;
+    extern uint32_t g_side_fx; g_side_fx++;
+    if (m->cpu.halted == 2) m->cpu.halted = 0;
+}
 static inline void wd(Machine* m, uint32_t a, uint32_t v) { for (int i = 0; i < 4; i++) wb(m, a + i, (uint8_t)(v >> (i * 8))); }
 
 static const int k_fifo_keep = 1024;   // FIFO にためておく量（これより多いと再生位置の報告が遅れる）
@@ -192,6 +199,7 @@ void avsdrv_hle(Machine* m) {
         ok(0);
         return;
     case 0x12:     // 状態
+        machine_driver_wait(m, 50);   // 状態の問い合わせにかかる時間（これを繰り返して待つソフトが多い）
         update_pos(m);
         if (a.playing && a.qn) { cpu_setsr(c, ES_, a.q_seg[0]); c->r[EBX] = (c->r[EBX] & 0xFFFF0000u) | a.q_off[0]; ok(1); }
         else ok(0);

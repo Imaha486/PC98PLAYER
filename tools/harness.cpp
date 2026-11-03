@@ -71,6 +71,7 @@ int main(int argc, char** argv) {
     extern int g_itr_stop_cs; if (getenv("ITRACE_STOP")) g_itr_stop_cs = (int)strtol(getenv("ITRACE_STOP"), 0, 16);
     { extern int g_trace_full; if (getenv("TRACEFULL")) g_trace_full = atoi(getenv("TRACEFULL")); }
     extern int g_trace_int; if (getenv("TRACEINT")) g_trace_int = (int)strtol(getenv("TRACEINT"), 0, 16);
+    { extern unsigned* g_stall_port; if (getenv("PORTCOUNT")) g_stall_port = new unsigned[65536](); }
     extern int g_trace_port_lo, g_trace_port_hi; if (getenv("TRACEPORT")) sscanf(getenv("TRACEPORT"), "%x-%x", &g_trace_port_lo, &g_trace_port_hi);
     if (getenv("WATCH")) { sscanf(getenv("WATCH"), "%x-%x", &g_watch_lo, &g_watch_hi); }
     FILE* ff = fopen("/home/claude/g/pc98player/tools/font.bin", "rb");
@@ -163,6 +164,7 @@ int main(int argc, char** argv) {
             if (f == from) { g_trace_port_lo = saved_lo; g_trace_port_hi = saved_hi; } } }
         bool shot = shots.count(f) > 0 || f == frames - 1; bool rend = shot || getenv("RENDERALL");
         p->run_frame(rend, !getenv("NOAUDIO"));
+        if (getenv("PERFREP") && f % 282 == 0) { void perf_report(Machine* m); perf_report(p->m); }
         if (!wav.empty()) pcm.insert(pcm.end(), p->audio.begin(), p->audio.end());
         if (shot) {
             char fn[256]; snprintf(fn, sizeof(fn), "%s_%05d.ppm", out.c_str(), f);
@@ -209,6 +211,7 @@ int main(int argc, char** argv) {
     { extern unsigned g_opna_hist[2][256]; fprintf(stderr, "hist:"); for (int pt = 0; pt < 2; pt++) for (int a = 0; a < 256; a++) if (g_opna_hist[pt][a]) fprintf(stderr, " %d:%02X=%u", pt, a, g_opna_hist[pt][a]); fprintf(stderr, "\n"); }
     if (getenv("DUMPMEM")) { unsigned sg, off, n; sscanf(getenv("DUMPMEM"), "%x:%x:%x", &sg, &off, &n); for (unsigned i = 0; i < n; i++) { if (i % 32 == 0) fprintf(stderr, "\n%04X:%04X ", sg, off + i); fprintf(stderr, "%02X ", p->m->ram[((sg << 4) + off + i) & 0xFFFFF]); } fprintf(stderr, "\n"); }
     { extern unsigned g_spin_hits; fprintf(stderr, "spin hits=%u\n", g_spin_hits); }
+    { extern unsigned* g_stall_port; if (getenv("PORTCOUNT") && g_stall_port) { fprintf(stderr, "ports:"); for (int i = 0; i < 65536; i++) if (g_stall_port[i] > 10000) fprintf(stderr, " %04X=%u", i, g_stall_port[i]); fprintf(stderr, "\n"); } }
     if (getenv("DUMPTEXT")) {
         int r0 = atoi(getenv("DUMPTEXT"));
         uint32_t tsad = (uint32_t)(p->m->gdcm.pram[0] | (p->m->gdcm.pram[1] << 8));
@@ -233,7 +236,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "\n[pegc] gdcm.disp=%d text tvram[0..8]=%02X %02X attr %02X\n", mm->gdcm.display, mm->tvram[0], mm->tvram[1], mm->tvram[0x2000]);
     }
     if (getenv("DUMPRAM")) { FILE* df = fopen(getenv("DUMPRAM"), "wb"); if (df) { fwrite(p->m->ram, 1, 0x100000, df); fclose(df); } }
-    { extern unsigned* g_prof_lin; if (g_prof_lin) { FILE* o = fopen(getenv("PROFLIN"), "wb"); fwrite(g_prof_lin, 4, 0x100000, o); fclose(o); } }
+    { extern unsigned* g_prof_lin; if (g_prof_lin && getenv("PROFLIN")) { FILE* o = fopen(getenv("PROFLIN"), "wb"); fwrite(g_prof_lin, 4, 0x100000, o); fclose(o); } }
     { extern unsigned* g_prof; if (g_prof) { for (int i = 0; i < 65536; i++) if (g_prof[i]) fprintf(stderr, "%04X:%u ", i, g_prof[i]); fprintf(stderr, "\n"); } }
     if (getenv("FDLIST") && floppy::image()) {   // フロッピーの各トラックの ID と状態
         FloppyImage* im = floppy::image();

@@ -28,7 +28,7 @@ void pc9821_probe(Machine* m, const char* why) {
     plog("[pc9821] PC-9821 らしいアクセス（%s）。PC-9821 として動かすか尋ねます\n", why);
     if (m->ask_pc9821(m->ask_pc9821_user)) {
         m->cfg.pc9821 = true;
-        m->ram[0x45C] |= 0x40;
+        pc9821_mark(m);
     }
 }
 void mem_probe(Machine* m, uint32_t a) { (void)a; pc9821_probe(m, "BIOS の 045Ch"); }
@@ -367,6 +367,51 @@ static uint8_t gdc_status(Machine* m, Gdc* g) {
     return st;
 }
 
+// ---- GDC の状態の読み待ち ------------------------------------------------------------
+// 垂直同期・水平帰線を「ステータスを読み続けて」待つループは、速いクロック（133MHz など）では
+// 1 フレームに数万回も回り、PC の CPU を食いつぶす。同じ命令から・同じレジスタのまま・ほかに何もせずに
+// 同じ値を何度も読んでいるときは、次に値が変わる時刻まで CPU を進めずに時間だけ進める
+//（読んだ結果は実機と同じ。数を数えながら待つループはレジスタが変わるので対象外）。
+uint64_t g_poll_until = 0;
+int64_t g_burn_cycles = 0;     // 命令を実行せずに進めたクロック（調べもの用）
+int g_cpu_yield = 0;
+static struct { uint16_t cs; uint32_t ip; uint32_t fx; uint32_t regs[8]; uint8_t v; uint16_t port; int n; } s_pw;
+static uint32_t gdc_ticks_to_change(const Machine* m) {
+    uint32_t pos = m->frame_pos, inl = pos % LINE_TICKS, hb = LINE_TICKS * 80 / 100;
+    uint32_t to_h = inl < hb ? hb - inl : LINE_TICKS - inl;
+    uint32_t vs = DISPLAY_LINES * LINE_TICKS;
+    uint32_t to_v = pos < vs ? vs - pos : (pos < FRAME_TICKS ? FRAME_TICKS - pos : 1);
+    return to_h < to_v ? to_h : to_v;
+}
+static void gdc_poll_watch(Machine* m, uint16_t port, uint8_t v, const Gdc* g) {
+    extern int g_idle_skip;
+    const Cpu& c = m->cpu;
+    bool same = s_pw.n > 0 && s_pw.port == port && s_pw.cs == c.op_cs && s_pw.ip == c.op_ip && s_pw.v == v &&
+                g_side_fx - s_pw.fx == 1 && memcmp(s_pw.regs, c.r, sizeof(s_pw.regs)) == 0;
+    s_pw.n = same ? s_pw.n + 1 : 1;
+    s_pw.port = port; s_pw.cs = c.op_cs; s_pw.ip = c.op_ip; s_pw.v = v; s_pw.fx = g_side_fx;
+    memcpy(s_pw.regs, c.r, sizeof(s_pw.regs));
+    if (s_pw.n < 4 || !g_idle_skip || !g->fifo.empty()) return;
+    g_poll_until = m->ticks + gdc_ticks_to_change(m);
+    g_cpu_yield = 1;
+}
+// ドライバの呼び出しにかかる時間（実機では CD ドライブへの問い合わせに 1ms 前後、PCM ドライバの状態の問い合わせにも
+// いくらかかかる）。HLE ではすぐに答えるので、状態を問い合わせ続けて待つソフトは、速いクロックだと
+// 1 フレームに何千回も問い合わせて PC の CPU を食いつぶす。問い合わせのたびに、その時間だけ CPU を止めて時間を進める
+//（割込みが来ればそこで再開）。IdleSkip=0 のときはしない
+void machine_driver_wait(Machine* m, uint32_t us) {
+    extern int g_idle_skip;
+    if (!g_idle_skip || !us) return;
+    uint64_t until = m->ticks + (uint64_t)us * MASTER_CLOCK / 1000000u;
+    if (until > g_poll_until) g_poll_until = until;
+    g_cpu_yield = 1;
+}
+static bool irq_waiting(const Machine* m) {
+    if (!(m->cpu.fl & FL_IF)) return false;
+    if (m->pic[0].irr & ~m->pic[0].imr & 0x7F) return true;
+    return (m->pic[1].irr & ~m->pic[1].imr) != 0;
+}
+
 // ---- キーボード / マウス ----------------------------------------------------
 void machine_key(Machine* m, uint8_t sc, bool down) {
     if (sc >= 0x80) return;
@@ -579,8 +624,10 @@ uint8_t mem_rb_slow(Machine* m, uint32_t a) {
     if (m->cfg.ems && (ems_frame_hit(a) || ems_upper_mapped(a))) return m->ram[a];   // EMS ページフレームと、その外にマップした EMS
     if (a >= 0xCC000 && a < 0xD0000 && m->cfg.sound_bios && m->cfg.sound_board) return m->ram[a];   // サウンド BIOS の ROM
     if (a < 0xE0000) return 0xFF;
+    if (a - 0xF8E80u < 2u && m->cfg.pc9821_ask) pc9821_probe(m, "ROM の機種の印（F8E80h）");
     if (a < 0x100000) return m->ram[a];
     if (a < g_ram_top) return m->ram[a];
+    if (pegc_flat(m, a)) return m->pegc_vram[a & 0x7FFFF];
     return 0xFF;
 }
 uint32_t g_watch_lo = 0, g_watch_hi = 0;
@@ -606,7 +653,8 @@ void mem_wb_slow(Machine* m, uint32_t a, uint8_t v) {
     if (m->cfg.ems && (ems_frame_hit(a) || ems_upper_mapped(a))) { m->ram[a] = v; return; }   // EMS
     if (a < 0xE8000) return;
     if (a < 0x100000) return;                 // ROM
-    if (a < g_ram_top) m->ram[a] = v;
+    if (a < g_ram_top) { m->ram[a] = v; return; }
+    if (pegc_flat(m, a)) m->pegc_vram[a & 0x7FFFF] = v;   // 1MB より上に見せる 256 色の VRAM
 }
 uint16_t mem_rw_slow(Machine* m, uint32_t a) {
     g_side_fx++;
@@ -678,9 +726,11 @@ uint8_t io_in8_(Machine* m, uint16_t port);
 static bool unknown_io_log(Machine* m, uint16_t port);
 uint8_t io_in8(Machine* m, uint16_t port) {
     g_side_fx++;
+    if ((port == 0x61 || port == 0xA1) && s_pw.n && s_pw.cs == m->cpu.op_cs && s_pw.ip == m->cpu.op_ip) s_pw.fx = g_side_fx;   // IN AX でステータスと一緒に読む隣のポート（読んでも何も変わらない）
     uint8_t v = io_in8_(m, port);
     if (g_dbg_on) dbg_note_io(m, port, v, false, false);
     { extern unsigned* g_stall_port; if (g_stall_port) g_stall_port[port]++; }
+    { extern unsigned* g_perf_port; if (g_perf_port) g_perf_port[port]++; }
     if (port >= g_trace_port_lo && port <= g_trace_port_hi && s_port_log++ < 3000) plog("[in ] %04X -> %02X @%04X:%04X\n", port, v, m->cpu.op_cs, m->cpu.op_ip);
     return v;
 }
@@ -701,9 +751,9 @@ uint8_t io_in8_(Machine* m, uint16_t port) {
     case 0x42: return 0x84 | 0x20 | 0x10;
     case 0x30: return 0x00;                 // RS-232C 受信データ（何も来ない）
     case 0x32: return 0x85;                 // RS-232C 状態: DSR・送信バッファ空・送信できる（受信なし）
-    case 0x60: return gdc_status(m, &m->gdcm);
+    case 0x60: { uint8_t v = gdc_status(m, &m->gdcm); gdc_poll_watch(m, port, v, &m->gdcm); return v; }
     case 0x62: { if (m->gdcm.fifo.empty()) return 0; uint8_t v = m->gdcm.fifo.front(); m->gdcm.fifo.erase(m->gdcm.fifo.begin()); return v; }
-    case 0xA0: return gdc_status(m, &m->gdcs);
+    case 0xA0: { uint8_t v = gdc_status(m, &m->gdcs); gdc_poll_watch(m, port, v, &m->gdcs); return v; }
     case 0xA2: { if (m->gdcs.fifo.empty()) return 0; uint8_t v = m->gdcs.fifo.front(); m->gdcs.fifo.erase(m->gdcs.fifo.begin()); return v; }
     case 0xA4: return m->disp_bank;
     case 0xA6: return m->draw_bank;
@@ -847,7 +897,7 @@ void io_out8(Machine* m, uint16_t port, uint8_t v) {
 }
 
 uint16_t io_in16(Machine* m, uint16_t port) {
-    g_side_fx++;
+    if (port != 0x60 && port != 0xA0) g_side_fx++;   // GDC のステータスは下の 1 バイトずつの読み出しで数える（読み待ちの判定に合わせる）
     return (uint16_t)(io_in8(m, port) | (io_in8(m, (uint16_t)(port + 1)) << 8));
 }
 void io_out16(Machine* m, uint16_t port, uint16_t v) {
@@ -998,6 +1048,16 @@ static void advance(Machine* m, uint32_t t) {
 void machine_run_frame(Machine* m) {
     const int SLICE = 96;
     while (m->frame_pos < FRAME_TICKS) {
+        if (g_poll_until) {   // GDC の状態の読み待ち（上）: CPU は止めたまま時間だけ進める
+            if (m->ticks >= g_poll_until || irq_waiting(m)) { g_poll_until = 0; s_pw.n = 0; }
+            else {
+                uint64_t left = g_poll_until - m->ticks;
+                uint32_t t = left < 32 ? (uint32_t)left : 32;
+                { int64_t c = (int64_t)((uint64_t)t * m->cpu_hz / MASTER_CLOCK); m->cpu.cycles += c; extern int64_t g_burn_cycles; g_burn_cycles += c; }
+                advance(m, t);
+                continue;
+            }
+        }
         int used = cpu_run(&m->cpu, SLICE);
         m->cyc_acc += (uint64_t)used * MASTER_CLOCK;
         uint32_t t = (uint32_t)(m->cyc_acc / m->cpu_hz);

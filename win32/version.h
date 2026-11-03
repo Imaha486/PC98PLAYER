@@ -1,8 +1,10 @@
-// PC98PLAYER のバージョン（リリースごとに日付で付ける。例 ver 261101 = 2026 年 11 月 1 日）
-// リソース（pc98player.rc）と F11 の画面の表示が使う
+// PC98PLAYER version (date of release, YYMMDD; e.g. ver 261101 = 2026-11-01).
+// Used by the resources (pc98player.rc) and the F11 screen.
+// Keep this file ASCII only: rc.exe reads it in the system code page (CP932),
+// and a UTF-8 comment at the end of a line can swallow the next line.
 #pragma once
 #define PC98P_VER_Y   26
 #define PC98P_VER_M   11
-#define PC98P_VER_D   2
-#define PC98P_VER_REV 2                 // 同じ日の 2 回目の版（261102-2）
-#define PC98P_VER_STR "261102-2"
+#define PC98P_VER_D   3
+#define PC98P_VER_REV 2                 // 2nd release of the same day (261103-2)
+#define PC98P_VER_STR "261103-2"

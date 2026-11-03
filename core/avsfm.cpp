@@ -459,6 +459,7 @@ static bool mod_wave(Machine* m, int ch, int16_t* out) {
     AvsFm& f = m->avsfm;
     AvsFmPart& p = f.part[ch];
     uint16_t speed = vchip(m, ch, 0x14);
+    if (speed == 0) return false;               // 速さ 0 = ゆらさない（0 で割らないように）
     uint16_t span = (uint16_t)(0xFFFFu / speed);
     int16_t v;
     switch (vchip(m, ch, 0x0A)) {

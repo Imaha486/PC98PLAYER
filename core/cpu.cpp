@@ -1067,6 +1067,7 @@ static void step() {
     case 0xCC: do_int(3); return;
     case 0xCD: { uint8_t v = f8();
         { extern unsigned* g_stall_int; if (g_stall_int) g_stall_int[v]++; }
+        { extern unsigned* g_perf_int; if (g_perf_int) g_perf_int[v]++; }
         if (g_dbg_on) dbg_note_int(M, v, false);
         // フロッピーから起動したとき: INT 2Fh AH=15h（MSCDEX）はベクタを通さず PC98PLAYER の MSCDEX へ
         if (v == 0x2F && g_int2f15_redirect && ((C->r[EAX] >> 8) & 0xFF) == 0x15 && !pmode()) {
@@ -1174,6 +1175,7 @@ void cpu_reset(Cpu* c, Machine* m) {
 //  その間にメモリへの書き込み・I/O・HLE・RAM 以外の読み出しが一度も無ければ、次の周回も必ず同じになる
 //  （変わりうるのは割込みだけ）ので、止めても結果は変わらない。I/O を読むループ（VSYNC 待ちなど）は対象外。
 int g_idle_skip = 1;
+extern int g_cpu_yield;
 unsigned g_spin_hits = 0;
 struct SpinSlot {
     bool valid; uint16_t cs; uint32_t ip; uint32_t fx;
@@ -1464,11 +1466,12 @@ int cpu_run(Cpu* c, int budget) {
                 if (op != 0xFA && op != 0x9D && op != 0xCD) { g_ifoff_cs = C->op_cs; g_ifoff_ip = C->op_ip; g_ifoff_kind = 0x100 | op; } }
         } else if (DW_UNLIKELY(s_dw.active)) step_dw(); else step();
         used += d_cyc;
-        // 短い後ろ向きの分岐（ループの戻り）
-        if (C->sr[CS_] == cs0 && C->ip < ip0 && ip0 - C->ip <= 64 && g_idle_skip) {
+        if (DW_UNLIKELY(g_cpu_yield)) { g_cpu_yield = 0; break; }   // GDC の状態の読み待ちに入った
+        // 後ろ向きの分岐（ループの戻り）。遠い呼び出しを含む 256 バイトまでのループも見る
+        if (C->sr[CS_] == cs0 && C->ip < ip0 && ip0 - C->ip <= 256 && g_idle_skip) {
             SpinSlot& sp = s_spin[(C->ip ^ (C->ip >> 3)) & 7];
             if (sp.valid && sp.cs == cs0 && sp.ip == C->ip && sp.fx == g_side_fx && spin_same(sp)) {
-                if (C->fl & FL_IF) { C->halted = 1; spin_clear(); used = budget; g_spin_hits++; break; }
+                if (C->fl & FL_IF) { C->halted = 2; spin_clear(); used = budget; g_spin_hits++; break; }   // 2 = 空回りで止めた（割込みか、HLE がメモリを書き換えたら再開）
             } else spin_record(sp);
         }
     }

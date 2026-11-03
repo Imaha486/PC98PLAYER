@@ -1892,7 +1892,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
             }
             g_shared_last = sp;
         }
+        LARGE_INTEGER pf0, pf1, pf2, pf3;
+        QueryPerformanceCounter(&pf0);
         pad::poll(g_p->m, GetForegroundWindow() == g_hwnd);   // ゲームパッド（窓が前にいるときだけ）
+        QueryPerformanceCounter(&pf1);
         if (g_turbo) {
             // 早送り: 画面 1 枚ぶん（約 1/60 秒）の実時間いっぱいまでフレームを進め、最後の 1 枚だけ描く。
             // 音は合成しない（捨てるだけなので）。
@@ -1910,6 +1913,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
             if (g_audio.queued_frames()) audio_flush();
         }
         int frames = g_turbo ? 0 : 1;
+        int underrun = 0;
         for (int i = 0; i < frames; i++) {
             codeedit::tick();   // 書き込み続けるコード（%）
             g_p->run_frame(i == frames - 1);
@@ -1917,18 +1921,45 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
                 int q = g_audio.queued_frames();
                 if (q < 12) {
                     if (q == 0) {   // 途切れたら少し先行させる
-                        std::vector<int16_t> sil(g_p->audio.size() * 2, 0);
+                        underrun++;
+                        std::vector<int16_t> sil(g_p->audio.size() * 4, 0);   // 約 4 フレーム（70ms）先行させる。PC の一時的な遅れ（ファイルの読み込みなど）で途切れにくくする
                         g_audio.push(sil.data(), sil.size());
                     }
                     g_audio.push(g_p->audio.data(), g_p->audio.size());
                 }
             }
         }
+        QueryPerformanceCounter(&pf2);
         next += frame_sec;
         if (t - next > 0.25) next = t;
         HDC dc = GetDC(g_hwnd);
         present(dc);
         ReleaseDC(g_hwnd, dc);
+        QueryPerformanceCounter(&pf3);
+        {   // 処理の重さ（Trace=1 のとき、約 5 秒ごとにログへ）。音が途切れる・処理落ちするときの手掛かり
+            static double s_pad = 0, s_emu = 0, s_draw = 0, s_max = 0, s_cpu = 0, s_snd = 0; static int s_n = 0, s_under = 0; static LONGLONG s_t0 = 0;
+            static int64_t s_cyc0 = 0; static unsigned s_spin0 = 0;
+            s_cpu += g_p->perf_cpu_ms; s_snd += g_p->perf_audio_ms;
+            double k = 1000.0 / (double)freq.QuadPart;
+            double tp = (pf1.QuadPart - pf0.QuadPart) * k, te = (pf2.QuadPart - pf1.QuadPart) * k, td = (pf3.QuadPart - pf2.QuadPart) * k;
+            if (!s_t0) s_t0 = pf0.QuadPart;
+            s_pad += tp; s_emu += te; s_draw += td; s_under += underrun; s_n++;
+            if (tp + te + td > s_max) s_max = tp + te + td;
+            double el = (pf3.QuadPart - s_t0) * k;   // 前に書いてからの実時間（ms）
+            if (el >= 5000.0) {   // 実時間で約 5 秒ごと（遅くても必ず書く）
+                extern unsigned g_spin_hits;
+                int64_t cyc = g_p->m->cpu.cycles;
+                if (g_p->ps.cfg.trace && !g_turbo) {
+                    plog("[perf] %.1f 秒で %d フレーム（実機は %.0f フレーム）。1 フレーム（%.1f ms）あたり: エミュレーション %.2f ms（CPU と周辺 %.2f ms・音の合成 %.2f ms）・画面 %.2f ms・ゲームパッド %.2f ms（最大 %.1f ms）。音の途切れ %d 回\n",
+                         el / 1000.0, s_n, el / 1000.0 / frame_sec, frame_sec * 1000.0, s_emu / s_n, s_cpu / s_n, s_snd / s_n, s_draw / s_n, s_pad / s_n, s_max, s_under);
+                    plog("[perf]   CPU %d MHz: 1 フレームに %.2f M クロック実行（空回りを飛ばした回数 %u）\n",
+                         g_p->ps.cfg.cpu_mhz, s_cyc0 ? (double)(cyc - s_cyc0) / s_n / 1e6 : 0.0, g_spin_hits - s_spin0);
+                }
+                { void perf_report(Machine* m); perf_report(g_p->m); }
+                s_cyc0 = cyc; s_spin0 = g_spin_hits;
+                s_pad = s_emu = s_draw = s_max = s_cpu = s_snd = 0; s_n = s_under = 0; s_t0 = pf3.QuadPart;
+            }
+        }
 
         if (g_p->m->quit && !ended_notice) {
             ended_notice = true;

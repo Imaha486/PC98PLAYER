@@ -200,13 +200,33 @@ static void ems_flush_all(Machine* m) { for (int p = 0; p < 8; p++) ems_flush(m,
 static void ems_reload_all(Machine* m) {
     for (int p = 0; p < 8; p++) { uint8_t* d = page_ptr(slot(p)[0], slot(p)[1]); if (d) memcpy(frame_ptr(m, p), d, EMS_PAGE); }
 }
+// 物理ページの割り当てをまとめて変える。変わるページだけを書き戻して読み込む
+//（割り当てのたびに 8 ページ全部を書き戻すと、頻繁に切り替えるソフトで非常に重くなる）。
+// 新しく割り当てる論理ページが、変わらない別の物理ページにも見えているときは、先にそちらを書き戻して
+// 最新の中身を読み込む。
+static void ems_remap(Machine* m, const int32_t want[8][2]) {
+    bool chg[8];
+    for (int p = 0; p < 8; p++) chg[p] = slot(p)[0] != want[p][0] || slot(p)[1] != want[p][1];
+    for (int p = 0; p < 8; p++) if (chg[p]) ems_flush(m, p);
+    for (int p = 0; p < 8; p++) {
+        if (!chg[p] || want[p][0] < 0) continue;
+        for (int q = 0; q < 8; q++) if (!chg[q] && slot(q)[0] == want[p][0] && slot(q)[1] == want[p][1]) ems_flush(m, q);
+    }
+    for (int p = 0; p < 8; p++) {
+        if (!chg[p]) continue;
+        slot(p)[0] = want[p][0]; slot(p)[1] = want[p][1];
+        uint8_t* d = page_ptr(want[p][0], want[p][1]);
+        if (d) memcpy(frame_ptr(m, p), d, EMS_PAGE);
+    }
+}
+static void ems_current(int32_t out[8][2]) { for (int p = 0; p < 8; p++) { out[p][0] = slot(p)[0]; out[p][1] = slot(p)[1]; } }
 static uint8_t ems_map(Machine* m, int p, int h, int l) {
     if (p < 0 || p > 7) return 0x8B;
     if (l != 0xFFFF && !page_ptr(h, l)) return ems_h((uint16_t)h) ? 0x8A : 0x83;
-    ems_flush_all(m);
-    if (l == 0xFFFF) { slot(p)[0] = -1; slot(p)[1] = -1; return 0; }
-    slot(p)[0] = h; slot(p)[1] = l;
-    memcpy(frame_ptr(m, p), page_ptr(h, l), EMS_PAGE);
+    int32_t want[8][2]; ems_current(want);
+    if (l == 0xFFFF) { want[p][0] = -1; want[p][1] = -1; }
+    else { want[p][0] = h; want[p][1] = l; }
+    ems_remap(m, want);
     return 0;
 }
 static void ems_unmap_handle(Machine* m, int h) {
@@ -277,9 +297,9 @@ static void ems_call(Machine* m) {
         EmsHandle* e = ems_h(DX(m));
         if (!e) { ret(0x83); return; }
         if (!e->has_saved) { ret(0x8E); return; }
-        ems_flush_all(m);
-        for (int p = 0; p < 4; p++) { s_frame[p][0] = (int16_t)e->saved[p * 2]; s_frame[p][1] = (int16_t)e->saved[p * 2 + 1]; }
-        ems_reload_all(m);
+        { int32_t want[8][2]; ems_current(want);
+          for (int p = 0; p < 4; p++) { want[p][0] = (int16_t)e->saved[p * 2]; want[p][1] = (int16_t)e->saved[p * 2 + 1]; }
+          ems_remap(m, want); }
         e->has_saved = false; ret(0); return; }
     case 0x4B: { int n = 0; for (auto& h : s_ems) if (h.used) n++; SETBX(m, (uint16_t)n); ret(0); return; }
     case 0x4C: { EmsHandle* e = ems_h(DX(m)); if (!e) { ret(0x83); return; } SETBX(m, (uint16_t)(e->data.size() / EMS_PAGE)); ret(0); return; }
@@ -300,9 +320,9 @@ static void ems_call(Machine* m) {
             }
             if (al == 0x01) {
                 uint32_t s = lin(m->cpu.sr[DS_], (uint16_t)R(m)[ESI]) + 2;
-                ems_flush_all(m);
-                for (int p = 0; p < 4; p++) { s_frame[p][0] = (int16_t)mem_rw(m, s); s_frame[p][1] = (int16_t)mem_rw(m, s + 2); s += 4; }
-                ems_reload_all(m); ret(0); return;
+                int32_t want[8][2]; ems_current(want);
+                for (int p = 0; p < 4; p++) { want[p][0] = (int16_t)mem_rw(m, s); want[p][1] = (int16_t)mem_rw(m, s + 2); s += 4; }
+                ems_remap(m, want); ret(0); return;
             }
             ret(0x8F); return;
         }
@@ -313,9 +333,9 @@ static void ems_call(Machine* m) {
         }
         if (al == 0x01 || al == 0x02) {
             uint32_t s = lin(m->cpu.sr[DS_], (uint16_t)R(m)[ESI]);
-            ems_flush_all(m);
-            for (int p = 0; p < 4; p++) { s_frame[p][0] = (int16_t)mem_rw(m, s); s_frame[p][1] = (int16_t)mem_rw(m, s + 2); s += 4; }
-            ems_reload_all(m);
+            int32_t want[8][2]; ems_current(want);
+            for (int p = 0; p < 4; p++) { want[p][0] = (int16_t)mem_rw(m, s); want[p][1] = (int16_t)mem_rw(m, s + 2); s += 4; }
+            ems_remap(m, want);
         }
         if (al > 3) { ret(0x8F); return; }
         ret(0); return; }

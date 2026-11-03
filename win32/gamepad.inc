@@ -172,8 +172,20 @@ static void poll(Machine* m, bool active) {
     s_frame++;
     if (!m) return;
     if (!s_on || !active || !find_device()) { if (s_joy || std::any_of(s_held, s_held + 128, [](uint8_t v) { return v != 0; })) release_all(m); return; }
+    // 読むのに時間がかかる装置（ドライバによっては 1 回に数 ms〜数十 ms 待たされる）は、毎フレームは読まない。
+    // 待たされた分だけエミュレーションが遅れ、音が途切れるため
+    static int s_skip = 0, s_slow = 0;
+    if (s_skip > 0) { s_skip--; return; }
     JOYINFOEX ji = {sizeof(ji)}; ji.dwFlags = JOY_RETURNALL | JOY_RETURNPOVCTS;
-    if (joyGetPosEx((UINT)s_dev, &ji) != JOYERR_NOERROR) {
+    LARGE_INTEGER q0, q1, qf; QueryPerformanceCounter(&q0);
+    MMRESULT jr = joyGetPosEx((UINT)s_dev, &ji);
+    QueryPerformanceCounter(&q1); QueryPerformanceFrequency(&qf);
+    double ms = (double)(q1.QuadPart - q0.QuadPart) * 1000.0 / (double)qf.QuadPart;
+    if (ms > 2.0) {
+        s_skip = ms > 8.0 ? 7 : 3;   // 遅い装置は 4〜8 フレームに 1 回だけ読む
+        if (s_slow++ == 0) plog("[pad] ゲームパッドの読み取りに %.1f ms かかります。数フレームおきに読みます\n", ms);
+    }
+    if (jr != JOYERR_NOERROR) {
         release_all(m);
         if (s_notice) s_notice(L"ゲームパッドが外れました");
         s_dev = -1; s_next_scan = GetTickCount() + 2000;

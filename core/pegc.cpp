@@ -197,7 +197,7 @@ bool pegc_mem_wb(Machine* m, uint32_t a, uint8_t v) {
         uint32_t o = a - 0xE0000;
         if (o < sizeof(p.mmio)) {
             if (o == 0x100 && ((p.mmio[o] ^ v) & 1)) plog("[pegc] 描き方: %s\n", (v & 1) ? "プレーン" : "パックドピクセル");
-            if (o == 0x102 && ((p.mmio[o] ^ v) & 1)) plog("[pegc] 上位メモリの VRAM（F00000h）: %s（未対応）\n", (v & 1) ? "有効" : "無効");
+            if (o == 0x102 && ((p.mmio[o] ^ v) & 1)) plog("[pegc] 上位メモリの VRAM（F00000h）: %s\n", (v & 1) ? "有効" : "無効");
             p.mmio[o] = v;
         }
         return true;

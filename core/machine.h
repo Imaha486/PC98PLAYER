@@ -456,7 +456,11 @@ void avgdrv_hle(Machine* m);
 
 // avsdrv.cpp
 void pc9821_probe(Machine* m, const char* why);
-static inline bool is_pc9821(const Machine* m) { return m->cfg.pc9821 || m->cfg.video_colors == 256; }   // 256 色のグラフィックがある機械   // PC-9821 らしいアクセス（PC9821= が無いときだけ尋ねる）
+void pc9821_mark(Machine* m);
+void machine_driver_wait(Machine* m, uint32_t us);   // ドライバの処理にかかる時間だけ CPU を止めて時間を進める   // BIOS のワーク・ROM に「PC-9821 である」印を付ける
+static inline bool is_pc9821(const Machine* m) { return m->cfg.pc9821 || m->cfg.video_colors == 256; }   // 256 色のグラフィックがある機械
+// F00000h-F7FFFFh に VRAM 全体を見せる（E0102h bit0）。プロテクトモードのソフトが使う
+static inline bool pegc_flat(const Machine* m, uint32_t a) { return a - 0xF00000u < 0x80000u && (m->pegc.mmio[0x102] & 1) && is_pc9821(m); }
 void avsfm_hle(Machine* m);
 void avsfm_reset(Machine* m);
 void avsfm_advance(Machine* m, uint32_t t);

@@ -34,6 +34,7 @@ static inline uint32_t lin(uint16_t s, uint16_t o) { return ((uint32_t)s << 4) +
 static uint16_t s_stub_ptr;
 static uint16_t put_stub(Machine* m, const uint8_t* code, int len) {
     uint16_t off = s_stub_ptr;
+    if (off < 0x8E80 && off + len > 0x8E80) plog("[bios] 入口の置き場が機種の印（F8E80h）に届きました\n");
     for (int i = 0; i < len; i++) m->ram[lin(ROMSEG, (uint16_t)(off + i))] = code[i];
     s_stub_ptr = (uint16_t)(s_stub_ptr + len);
     return off;
@@ -493,6 +494,8 @@ static void int18(Machine* m) {
         if (!is_pc9821(m) || ch > 1) return;
         if (m->pegc.on != ch) plog("[pegc] %s（INT 18h AH=4Dh）\n", ch ? "256 色モードにしました" : "16 色モードに戻しました");
         m->pegc.on = ch;
+        if (ch) m->ram[0x54D] |= 0x80;                         // bit7: いま 256 色
+        else m->ram[0x54D] &= 0x7F;
         return; }
     default:
         if (m->cfg.trace) plog("[bios] INT 18h AH=%02Xh 未対応\n", ah);
@@ -854,7 +857,7 @@ void bios_init(Machine* m) {
     r[0x594] = 0;
     r[0x481] = 0x00;
     r[0x458] = 0x00;
-    if (is_pc9821(m)) r[0x45C] |= 0x40;   // PC-9821（256 色のグラフィックあり）
+    if (is_pc9821(m)) pc9821_mark(m);     // PC-9821（256 色のグラフィックあり）
     { extern uint32_t g_probe_addr; g_probe_addr = (m->cfg.pc9821_ask && !is_pc9821(m)) ? 0x45Cu : 0xFFFFFFFFu; }
     r[0x55D] = 0x01;               // ハードディスク（SASI/IDE）がユニット 0 に付いている（ゲームのフォルダ）
     r[0x55C] = 0x03;               // 1MB の FDD がユニット 0・1 に付いている（仮想フロッピーはユニット 0）
@@ -877,6 +880,19 @@ void bios_init(Machine* m) {
     r[0xFFFFE] = 0xFE;
 }
 
+// ---- PC-9821 の印 --------------------------------------------------------------
+// ソフトが PC-9821 かどうかを見る場所は機種によりまちまちなので、知られているものに全部印を付ける。
+//  ・0045Ch bit6: 拡張グラフィック（256 色）あり
+//  ・00597h bit2: CRT BIOS が PC-9821 のもの
+//  ・F8E8:0000〜: ROM の機種の印（先頭 2 バイトが 98h 21h。続きは機能の印）
+static const uint32_t k_id_rom = 0xF8E80;
+static const uint8_t k_id_bytes[6] = {0x98, 0x21, 0x1F, 0x20, 0x2C, 0xB0};
+void pc9821_mark(Machine* m) {
+    m->ram[0x45C] |= 0x40;
+    m->ram[0x597] |= 0x04;
+    for (int i = 0; i < 6; i++) m->ram[k_id_rom + (uint32_t)i] = k_id_bytes[i];
+}
+
 // ---- ブートモード（フロッピーの IPL から起動する） ---------------------------------
 //  PC-98 の起動 ROM と同じく、ユニット 0 の C=0 H=0 R=1 から IPL を読み込んで実行を始める。
 //   ・まず MFM（倍密度）で ID を探し、無ければ FM（単密度）で探す
@@ -891,6 +907,7 @@ static bool rom_fill_area(uint32_t a) {
     if (a < k_basic_lo || a >= k_rom_hi) return false;
     if (a >= s_rom_used_lo && a < s_rom_used_hi) return false;
     if (a >= 0xF9900 && a < 0xF9A00) return false;                    // LIO の入口
+    if (a >= 0xF8E80 && a < 0xF8E90) return false;                    // 機種の印（PC-9821）
     return true;
 }
 bool bios_rom_trap(Machine* m) {

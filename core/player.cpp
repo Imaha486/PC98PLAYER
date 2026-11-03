@@ -8,6 +8,7 @@
 #include "debugdump.h"
 #include "hostfs.h"
 #include <string.h>
+#include <chrono>
 #include <stdlib.h>
 #include <math.h>
 #include <algorithm>
@@ -520,6 +521,41 @@ static const float k_avs_makeup = 4.0f;    // +12dB（内蔵の AVSDRV の PCM�
 uint32_t g_int21_count = 0;
 unsigned* g_stall_int = nullptr;    // 調べている間だけ: ソフトウェア割込みの回数
 unsigned* g_stall_port = nullptr;   // 調べている間だけ: ポートの読み出しの回数
+// 処理の重さの調べもの（Trace=1）: よく実行した場所・読んだポート・呼んだ割込みを、前回からの分だけ書く
+unsigned* g_perf_port = nullptr;
+unsigned* g_perf_int = nullptr;
+void perf_report(Machine* m) {
+    extern unsigned* g_prof_lin;
+    extern int64_t g_burn_cycles;
+    static int64_t burn0 = 0;
+    if (!m->cfg.trace) return;
+    if (g_prof_lin && g_perf_port && g_perf_int) {
+        std::vector<std::pair<unsigned, uint32_t>> v;
+        for (uint32_t a = 0; a < 0x100000; a++) if (g_prof_lin[a]) v.push_back({g_prof_lin[a], a});
+        std::sort(v.rbegin(), v.rend());
+        uint64_t tot = 0; for (auto& x : v) tot += x.first;
+        std::string s;
+        for (size_t i = 0; i < v.size() && i < 12; i++) { char b[48]; snprintf(b, sizeof b, " %05X(%.1f%%)", v[i].second, tot ? 100.0 * v[i].first / tot : 0.0); s += b; }
+        plog("[perf]   よく実行した場所（実際の番地）:%s\n", s.c_str());
+        s.clear();
+        if (!v.empty()) {   // いちばん多い場所の前後のコード
+            uint32_t a = v[0].second;
+            for (int i = -8; i < 24; i++) { char b[4]; snprintf(b, sizeof b, " %02X", m->ram[(a + (uint32_t)i) & 0xFFFFF]); s += b; if (i == -1) s += " |"; }
+            plog("[perf]   %05X の前後: %s\n", a, s.c_str());
+        }
+        std::vector<std::pair<unsigned, int>> pv; for (int i = 0; i < 65536; i++) if (g_perf_port[i]) pv.push_back({g_perf_port[i], i});
+        std::sort(pv.rbegin(), pv.rend());
+        s.clear(); for (size_t i = 0; i < pv.size() && i < 10; i++) { char b[32]; snprintf(b, sizeof b, " %04X(%u)", pv[i].second, pv[i].first); s += b; }
+        plog("[perf]   読んだポート:%s\n", s.empty() ? " なし" : s.c_str());
+        s.clear(); for (int i = 0; i < 256; i++) if (g_perf_int[i]) { char b[24]; snprintf(b, sizeof b, " INT %02Xh(%u)", i, g_perf_int[i]); s += b; }
+        plog("[perf]   呼んだ割込み:%s\n", s.empty() ? " なし" : s.c_str());
+        plog("[perf]   命令を実行せずに進めたクロック: %.1f M\n", (double)(g_burn_cycles - burn0) / 1e6);
+    }
+    burn0 = g_burn_cycles;
+    if (!g_prof_lin) g_prof_lin = (unsigned*)calloc(0x100000, sizeof(unsigned)); else memset(g_prof_lin, 0, 0x100000 * sizeof(unsigned));
+    if (!g_perf_port) g_perf_port = new unsigned[65536](); else memset(g_perf_port, 0, 65536 * sizeof(unsigned));
+    if (!g_perf_int) g_perf_int = new unsigned[256](); else memset(g_perf_int, 0, 256 * sizeof(unsigned));
+}
 static void stall_check(Machine* m) {
     static uint32_t last = 0xFFFFFFFF; static int quiet = 0, sampling = 0, reports = 0;
     static std::map<uint32_t, unsigned> ips;
@@ -558,7 +594,10 @@ static void stall_check(Machine* m) {
 
 void Player::run_frame(bool render_video, bool render_audio) {
     uint64_t t0 = m->ticks;
+    auto pc0 = std::chrono::steady_clock::now();
     machine_run_frame(m);
+    auto pc1 = std::chrono::steady_clock::now();
+    perf_cpu_ms = std::chrono::duration<double, std::milli>(pc1 - pc0).count();
     if (m->cfg.trace && !m->quit) { extern bool g_if_track; g_if_track = true; stall_check(m); }
     if (g_dbg_on) dbg_frame(m);
     floppy::idle();
@@ -687,6 +726,7 @@ void Player::run_frame(bool render_video, bool render_audio) {
     m->pcm_out.clear();
     m->regw.clear();
     m->beepw.clear();
+    perf_audio_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pc1).count();
     if (render_audio) sample_acc -= (double)(t1 - t0);
     else cdda::skip_seconds((double)(t1 - t0) / MASTER_CLOCK);   // 早送り: CD-DA の位置だけ進める
     if (render_video) {

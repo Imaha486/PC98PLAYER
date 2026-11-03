@@ -11,6 +11,9 @@
 #include <math.h>
 #include <stdlib.h>
 #include <algorithm>
+#include <map>
+#include <string>
+#include <vector>
 
 #define DR_MP3_IMPLEMENTATION
 #define DR_MP3_NO_STDIO
@@ -67,6 +70,22 @@ static bool wav_header(void* h, Wav* w) {
     return w->fmt == 1 && w->data && w->ch >= 1 && w->ch <= 8 && w->rate > 0 && (w->bits == 8 || w->bits == 16 || w->bits == 24);
 }
 
+// MP3 の頭出しの目印（ファイルごとに 1 回だけ作って覚えておく）。
+// 目印が無いと、途中から鳴らすたびにファイルの先頭から展開し直すことになり、
+// 長い曲の途中を何度も鳴らすソフト（音声や効果音を 1 つのトラックにまとめたもの）で、そのたびに止まる
+static std::map<std::string, std::vector<drmp3_seek_point>> s_mp3_marks;
+static void mp3_marks(drmp3* mp3, const std::string& path) {
+    auto it = s_mp3_marks.find(path);
+    if (it == s_mp3_marks.end()) {
+        std::vector<drmp3_seek_point> v(2048);
+        drmp3_uint32 n = (drmp3_uint32)v.size();
+        if (!drmp3_calculate_seek_points(mp3, &n, v.data())) n = 0;
+        v.resize(n);
+        it = s_mp3_marks.emplace(path, std::move(v)).first;
+    }
+    if (!it->second.empty()) drmp3_bind_seek_table(mp3, (drmp3_uint32)it->second.size(), it->second.data());
+}
+
 // 今読んでいるトラックの読み手（1 つだけ持つ）
 struct Reader {
     int no = -1, src = SRC_NONE;
@@ -84,7 +103,7 @@ struct Reader {
         if (fh) { hostfs::close(fh); fh = nullptr; }
         no = -1; src = SRC_NONE; buf.clear(); buf_start = next = 0;
     }
-    bool open(const Track& t) {
+    bool open(const Track& t, bool want_marks = true) {
         close();
         no = t.no; src = t.src; base = t.file_off;
         fh = hostfs::open(t.path, 0, false, false);
@@ -95,6 +114,7 @@ struct Reader {
             mp3 = new drmp3();
             if (!drmp3_init(mp3, rd_cb, mp3_seek_cb, mp3_tell_cb, nullptr, fh, nullptr)) { delete mp3; mp3 = nullptr; close(); return false; }
             rate = (int)mp3->sampleRate; ch = (int)mp3->channels;
+            if (want_marks) mp3_marks(mp3, t.path);
         } else if (src == SRC_FLAC) {
             flac = drflac_open(rd_cb, flac_seek_cb, flac_tell_cb, fh, nullptr);
             if (!flac) { close(); return false; }
@@ -199,7 +219,7 @@ static std::string dir_of(const std::string& p) {
 static int64_t audio_frames44(const std::string& path, int src) {
     Track t; t.no = 0; t.src = src; t.path = path;
     Reader r;
-    if (!r.open(t)) return -1;
+    if (!r.open(t, false)) return -1;
     int64_t n = -1;
     if (src == SRC_WAV) n = r.wav.bytes / (r.wav.ch * (r.wav.bits / 8));
     else if (src == SRC_MP3) n = (int64_t)drmp3_get_pcm_frame_count(r.mp3);
