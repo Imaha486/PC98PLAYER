@@ -5,6 +5,6 @@
 #pragma once
 #define PC98P_VER_Y   26
 #define PC98P_VER_M   11
-#define PC98P_VER_D   3
-#define PC98P_VER_REV 2                 // 2nd release of the same day (261103-2)
-#define PC98P_VER_STR "261103-2"
+#define PC98P_VER_D   4
+#define PC98P_VER_REV 0
+#define PC98P_VER_STR "261104"

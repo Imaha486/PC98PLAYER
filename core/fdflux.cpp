@@ -42,8 +42,11 @@ struct RawSec {
     bool    has_data = false;   // データ部が見つかった
     bool    deleted = false;
     bool    data_ok = false;    // データの CRC が合った
+    double  data_us = 0;        // データ部（本体）を読むのにかかった時間（µs）
     std::vector<uint8_t> data;
 };
+// セルの位置 → 時刻（µs）。flux_to_cells で作る（無ければ 0 のまま）
+static std::vector<double> s_cell_us;
 
 // セル列（1 セル 1 バイト, 0/1）から 1 バイト（データビットは 2 セルずつの後ろ側）
 inline uint8_t mfm_byte(const uint8_t* cells, size_t p) {
@@ -106,6 +109,8 @@ void scan_mfm(const std::vector<uint8_t>& cells, size_t from, size_t id_limit, s
                 }
                 d.resize(std::min(take, len));
                 s.data.swap(d);
+                size_t e = p + len * 16;
+                if (e < s_cell_us.size() && p < s_cell_us.size()) s.data_us = s_cell_us[e] - s_cell_us[p];
             }
             last_id = -1;
             // データ部の中に隠れた ID もあり得るので、データの中も続けて探す
@@ -202,15 +207,17 @@ double estimate_cell(const std::vector<float>& flux, size_t a, size_t b) {
 void flux_to_cells(const std::vector<float>& flux, double cell0, std::vector<uint8_t>& cells, std::vector<size_t>& pos_of_flux) {
     cells.clear(); cells.reserve((size_t)(flux.size() * 3));
     pos_of_flux.resize(flux.size() + 1);
+    s_cell_us.clear(); s_cell_us.reserve((size_t)(flux.size() * 3));
+    double now = 0;   // フラックスの時刻（flux の単位: ns）
     double cell = cell0, carry = 0;
     for (size_t i = 0; i < flux.size(); i++) {
         pos_of_flux[i] = cells.size();
         double t = flux[i] + carry;
         int n = (int)floor(t / cell + 0.5);
         if (n < 1) n = 1;
-        if (n > 64) { n = (int)(t / cell); carry = 0; for (int k = 0; k < n - 1; k++) cells.push_back(0); cells.push_back(1); continue; }
-        for (int k = 0; k < n - 1; k++) cells.push_back(0);
-        cells.push_back(1);
+        double t0 = now; now += flux[i];
+        if (n > 64) { n = (int)(t / cell); carry = 0; for (int k = 0; k < n; k++) { s_cell_us.push_back((t0 + flux[i] * (k + 1) / n) / 1000.0); cells.push_back(k == n - 1 ? 1 : 0); } continue; }
+        for (int k = 0; k < n; k++) { s_cell_us.push_back((t0 + flux[i] * (k + 1) / n) / 1000.0); cells.push_back(k == n - 1 ? 1 : 0); }
         double err = t - n * cell;
         carry = err * 0.3;                                   // 位相のずれを少し持ち越す
         if (n <= 4) {
@@ -250,6 +257,11 @@ void merge_revs(const std::vector<std::vector<RawSec>>& revs, int cyl, int head,
             else if (s->has_data) bad.push_back(s);
         }
         size_t ss = (size_t)128 << std::min<int>(o.n, 7);
+        {   // データ部を読む時間: 測れた回の平均
+            double sum = 0; int n = 0;
+            for (auto* s : sl.v) if (s->data_us > 0) { sum += s->data_us; n++; }
+            o.data_us = n ? sum / n : 0;
+        }
         if (good) {
             o.status = 0x00; o.deleted = good->deleted; o.data = good->data;
         } else if (!bad.empty()) {
@@ -325,6 +337,7 @@ bool decode_flux(const std::vector<float>& flux, const std::vector<size_t>& inde
 bool decode_cells(const std::vector<uint8_t>& cells_in, double cell_ns, int cyl, int head, FdTrack& out, int* media_out) {
     out.secs.clear(); out.diags.clear();
     if (media_out) *media_out = -1;
+    s_cell_us.clear();   // セル列のイメージ（HFE 等）には時間の情報が無い
     if (cells_in.size() < 1000) return false;
     // 1 回転ぶん。索引をまたぐセクタのため先頭を少し後ろへつなぐ
     std::vector<uint8_t> cells = cells_in;

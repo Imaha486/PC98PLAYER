@@ -43,6 +43,7 @@ int main(int argc, char** argv) {
     if (argc < 2) { fprintf(stderr, "usage: harness gamedir [--start cmd] [--frames n] [--shot a,b] [--key f:sc[:u]] [--wav f] [--out prefix]\n"); return 1; }
     std::string dir = argv[1];
     std::string start, out = "shot", wav, ini_path;
+    int scp_f = -1; std::string scp_path;
     int frames = 600, mhz = 0;
     std::set<int> shots;
     std::vector<KeyEv> keys;
@@ -59,6 +60,7 @@ int main(int argc, char** argv) {
         else if (a == "--save") { std::string s2 = next(); sscanf(s2.c_str(), "%d:%d", &save_f, &save_slot); }
         else if (a == "--load") { std::string s2 = next(); sscanf(s2.c_str(), "%d:%d", &load_f, &load_slot); }
         else if (a == "--wav") wav = next();
+        else if (a == "--scpsave") { std::string s2 = next(); size_t c = s2.find(':'); scp_f = atoi(s2.substr(0, c).c_str()); scp_path = s2.substr(c + 1); }
         else if (a == "--fd") { std::string s2 = next(); size_t c = s2.find(':'); fdev.push_back({atoi(s2.substr(0, c).c_str()), s2.substr(c + 1)}); }
         else if (a == "--cpfile") { std::string s2 = next(); size_t c1 = s2.find(':'), c2 = s2.find(':', c1 + 1); cpev.push_back({atoi(s2.substr(0, c1).c_str()), {s2.substr(c1 + 1, c2 - c1 - 1), s2.substr(c2 + 1)}}); }
         else if (a == "--out") out = next();
@@ -164,6 +166,11 @@ int main(int argc, char** argv) {
             if (f == from) { g_trace_port_lo = saved_lo; g_trace_port_hi = saved_hi; } } }
         bool shot = shots.count(f) > 0 || f == frames - 1; bool rend = shot || getenv("RENDERALL");
         p->run_frame(rend, !getenv("NOAUDIO"));
+        if (f == scp_f && !scp_path.empty()) {
+            FloppyImage* im = floppy::image_unit(0); std::string er;
+            bool ok = im && im->save_scp(scp_path, &er, [](int d, int t, void*) { if (d % 40 == 0) fprintf(stderr, "scp %d/%d\n", d, t); return true; }, nullptr);
+            fprintf(stderr, "scpsave %s: %s\n", scp_path.c_str(), ok ? "ok" : er.c_str());
+        }
         if (getenv("PERFREP") && f % 282 == 0) { void perf_report(Machine* m); perf_report(p->m); }
         if (!wav.empty()) pcm.insert(pcm.end(), p->audio.begin(), p->audio.end());
         if (shot) {

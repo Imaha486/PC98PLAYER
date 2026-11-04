@@ -67,6 +67,7 @@
     <ClCompile Include="core\rhythm_rom.cpp" />
     <ClCompile Include="core\xmsems.cpp" />
     <ClCompile Include="core\pegc.cpp" />
+    <ClCompile Include="core\fdc.cpp" />
     <ClCompile Include="core\avgdrv.cpp" />
     <ClCompile Include="core\pcm86.cpp" />
     <ClCompile Include="core\lio.cpp" />

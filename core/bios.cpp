@@ -319,6 +319,9 @@ static void console_putc_body(Machine* m, uint8_t c) {
             k.esc = 0; return;
         }
         if (k.esc == 2) {
+            // 数字の代わりに 00h〜09h（数そのもの）を送るソフトがある（"ESC [ 3" + 07h + "m" で白）。
+            // 実機の CON は数字を下位 4 ビットで読むので、同じ数字として受ける
+            if (c <= 0x09) c = (uint8_t)('0' + c);
             if ((c >= '0' && c <= '9') || c == ';' || c == '>' || c == '?') {
                 if (k.blen < 30) { k.buf[k.blen++] = (char)c; k.buf[k.blen] = 0; }
                 return;

@@ -1593,7 +1593,7 @@ static void dos_exec(Machine* m) {
     }
     LoadResult lr;
     int err = load_program(m, name, tail, env ? env : rw(m, lin(s_psp, 0x2C)), s_psp, &lr, as_given ? name.c_str() : nullptr);
-    if (err) { dos_error(m, (uint16_t)err); return; }
+    if (err) { if (m->cfg.trace) plog("[dos] 起動できません: %s（エラー %d）\n", name.c_str(), err); dos_error(m, (uint16_t)err); return; }
     if (al == 1) {
         ww(m, pb + 0x0E, lr.sp); ww(m, pb + 0x10, lr.ss);
         ww(m, pb + 0x12, lr.ip); ww(m, pb + 0x14, lr.cs);

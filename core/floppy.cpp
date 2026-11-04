@@ -437,6 +437,85 @@ bool FloppyImage::save_d88(const std::string& out_path, std::string* err) {
     return ok;
 }
 
+// SCP（SuperCard Pro の形式）: 16 バイトの見出し、168 トラックぶんの位置、トラックごとに
+// "TRK" + 番号、回転ごとの {索引の間隔, 反転の数, データの位置}、反転の間隔（25ns 単位・16 ビット・上位が先）
+bool FloppyImage::save_scp(const std::string& out_path, std::string* err, bool (*progress)(int, int, void*), void* user) {
+    if (!src || !src->has_flux()) { if (err) *err = "磁気の記録のまま読めるドライブ（Greaseweazle）のディスクではありません"; return false; }
+    int ncyl = cylinders > 0 ? cylinders : (src->cyl_hint > 0 ? src->cyl_hint : 80);
+    if (ncyl > 84) ncyl = 84;
+    int total = ncyl * 2;
+    int revs = 0;
+    std::vector<std::vector<std::vector<uint16_t>>> all((size_t)total);   // トラック → 回転 → 値
+    std::vector<std::vector<uint32_t>> idx_time((size_t)total);
+    for (int t = 0; t < total; t++) {
+        if (progress && !progress(t, total, user)) { if (err) *err = "やめました"; return false; }
+        FdTrack tr;
+        bool ok = src->fetch(t / 2, t & 1, tr);
+        if (!ok && !src->last_error().empty()) { if (err) *err = src->last_error(); return false; }
+        if (ok) { trk[t] = std::move(tr); loaded[t] = true; }   // 読み直したついでに、今のディスクの中身も新しくする
+        std::vector<float> flux; std::vector<size_t> ix;
+        if (!src->last_flux(flux, ix) || ix.size() < 2) continue;
+        int nr = (int)ix.size() - 1;
+        for (int r = 0; r < nr; r++) {
+            std::vector<uint16_t> v;
+            double acc = 0;
+            for (size_t k = ix[r]; k < ix[r + 1] && k < flux.size(); k++) {
+                double ticks = flux[k] / 25.0;
+                acc += ticks;
+                uint32_t q = (uint32_t)(ticks + 0.5);
+                if (q == 0) q = 1;
+                while (q >= 65536) { v.push_back(0); q -= 65536; }
+                v.push_back((uint16_t)q);
+            }
+            all[t].push_back(std::move(v));
+            idx_time[t].push_back((uint32_t)(acc + 0.5));
+        }
+        if (revs == 0 || nr < revs) revs = nr;
+    }
+    if (progress) progress(total, total, user);
+    if (revs <= 0) { if (err) *err = "読み取れたトラックがありません"; return false; }
+    if (revs > 5) revs = 5;
+    std::vector<uint8_t> o(0x10 + 168 * 4, 0);
+    memcpy(&o[0], "SCP", 3);
+    o[3] = 0x19;                          // 版 1.9
+    o[4] = 0x80;                          // ディスクの種類: そのほか
+    o[5] = (uint8_t)revs;
+    o[6] = 0; o[7] = (uint8_t)(total - 1);
+    o[8] = 0x01;                          // 索引から読み始めた
+    o[9] = 0;                             // 16 ビット
+    o[10] = 0;                            // 両面
+    o[11] = 0;                            // 25ns
+    auto put32 = [](std::vector<uint8_t>& b, size_t at, uint32_t v) { b[at] = (uint8_t)v; b[at + 1] = (uint8_t)(v >> 8); b[at + 2] = (uint8_t)(v >> 16); b[at + 3] = (uint8_t)(v >> 24); };
+    for (int t = 0; t < total; t++) {
+        if ((int)all[t].size() < revs) continue;
+        uint32_t pos = (uint32_t)o.size();
+        put32(o, 0x10 + (size_t)t * 4, pos);
+        o.push_back('T'); o.push_back('R'); o.push_back('K'); o.push_back((uint8_t)t);
+        size_t ent = o.size();
+        o.resize(o.size() + (size_t)revs * 12, 0);
+        for (int r = 0; r < revs; r++) {
+            uint32_t doff = (uint32_t)(o.size() - pos);
+            put32(o, ent + (size_t)r * 12, idx_time[t][r]);
+            put32(o, ent + (size_t)r * 12 + 4, (uint32_t)all[t][r].size());
+            put32(o, ent + (size_t)r * 12 + 8, doff);
+            for (uint16_t v : all[t][r]) { o.push_back((uint8_t)(v >> 8)); o.push_back((uint8_t)v); }
+        }
+    }
+    uint32_t sum = 0;
+    for (size_t i = 0x10; i < o.size(); i++) sum += o[i];
+    put32(o, 12, sum);
+    void* h = hostfs::open(out_path, 1, true, true);
+    if (!h) { if (err) *err = "書き出し先を作れません"; return false; }
+    bool ok = true;
+    for (size_t off = 0; off < o.size() && ok; off += 1 << 20) {
+        int n = (int)std::min<size_t>(1 << 20, o.size() - off);
+        ok = hostfs::write(h, o.data() + off, n) == n;
+    }
+    hostfs::close(h);
+    if (!ok && err) *err = "書き出しに失敗しました";
+    return ok;
+}
+
 bool FloppyImage::read_lba(uint32_t lba, uint8_t* buf) {
     FdSector* s = lba_sector(lba);
     if (!s) { memset(buf, 0, (size_t)lsec_size); return false; }
@@ -461,6 +540,9 @@ static char s_letter2 = 0;
 static int s_swap_sense[2];          // 2 台目のドライブの DOS のドライブ名（0 = DOS からは見せない）
 static uint32_t s_changes2 = 0;
 static int s_head_pos[4];          // 各ユニットのヘッド位置（シリンダ）
+// FDC（fdc.cpp）と共有する: BIOS で動かしたヘッドの位置は、直接 FDC を使うソフトからも同じに見える
+int  floppy_head_pos(int unit) { return s_head_pos[unit & 3] < 0 ? 0 : s_head_pos[unit & 3]; }
+void floppy_set_head_pos(int unit, int cyl) { s_head_pos[unit & 3] = cyl; }
 static bool s_force_wp = false;
 void set_force_wprot(bool on) { s_force_wp = on; if (s_img && on) s_img->wprot = true; }
 bool force_wprot() { return s_force_wp; }
@@ -675,6 +757,9 @@ static void bios_int1b_body(Machine* m) {
         return; }
     case 0x07:   // RECALIBRATE
         s_head_pos[unit] = 0; ret(0x00); return;
+    case 0x00:   // SEEK（AH の bit4 が立っていれば C のシリンダへ動かす。立っていなければ何もせずに成功）
+        if (seek) s_head_pos[unit] = C;
+        ret(0x00); return;
     case 0x0A: { // READ ID
         if (seek) s_head_pos[unit] = C;
         FdTrack* t = im->track(s_head_pos[unit], H & 1);

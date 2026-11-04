@@ -25,6 +25,31 @@
 #define DISPLAY_LINES    400
 #define FRAME_TICKS      (LINE_TICKS * FRAME_LINES)   // ≒ 56.4Hz
 
+// 8237 DMA（PC-98: ch n のアドレス 01h+4n・数 03h+4n、モード 17h、マスク 15h/1Fh、フリップフロップ 19h、
+// バンク ch0=27h ch1=21h ch2=23h ch3=25h）
+struct Dma8237 {
+    uint16_t base_addr[4], addr[4], base_cnt[4], cnt[4];
+    uint8_t  mode[4], bank[4];
+    uint8_t  mask;               // bit n = ch n を止めている
+    uint8_t  ff;                 // 下位/上位のどちらを書くか
+};
+// 1MB の FDD のコントローラ（µPD765。90h = 状態、92h = データ、94h = 制御）。
+// BIOS（INT 1Bh）を通さずに直接命令を送るソフト向け。読み出しの結果はイメージから作る
+struct Fdc765 {
+    uint8_t phase;               // 0 = 命令待ち、1 = 命令の途中、2 = 結果を返している
+    uint8_t cmd[9], ncmd, need;
+    uint8_t res[7], nres, rpos;
+    uint8_t pcn[4];              // ヘッドのシリンダ
+    uint8_t seek_end;            // bit n = ユニット n のシーク・リキャリブレートが終わった（SENSE INTERRUPT で返す）
+    uint8_t seek_st0[4];
+    int32_t irq_wait;            // 割込みまでの時間（基準クロック）。0 = 予定なし
+    uint8_t ctrl;                // 94h に書いた値
+    // 読み書きの実行中（phase 3）: DMA の数・アドレスは時間とともに進んで見える
+    uint64_t xfer_t0, xfer_t1;   // 転送の始まり・終わり（基準クロックの通算）
+    uint32_t xfer_bytes;
+    uint16_t cnt0, addr0;        // 転送前の DMA の数・アドレス（チャネル 2）
+};
+
 struct Pic {
     uint8_t imr, irr, isr, base;
     uint8_t icw_step, icw4_needed, read_isr, aeoi;
@@ -314,6 +339,8 @@ struct Machine {
     AvsFm    avsfm;
     Pegc     pegc;
     PegcPlanar pegc_planar;      // プレーンモードのラッチ
+    Dma8237 dma;
+    Fdc765 fdc;
     std::vector<uint8_t> pegc_vram;  // 256 色の VRAM（512KB）
     Config   cfg;
 
@@ -457,6 +484,10 @@ void avgdrv_hle(Machine* m);
 // avsdrv.cpp
 void pc9821_probe(Machine* m, const char* why);
 void pc9821_mark(Machine* m);
+void fdc_reset(Machine* m);
+bool fdc_io_in(Machine* m, uint16_t port, uint8_t* v);
+bool fdc_io_out(Machine* m, uint16_t port, uint8_t v);
+void fdc_advance(Machine* m, uint32_t t);
 void machine_driver_wait(Machine* m, uint32_t us);   // ドライバの処理にかかる時間だけ CPU を止めて時間を進める   // BIOS のワーク・ROM に「PC-9821 である」印を付ける
 static inline bool is_pc9821(const Machine* m) { return m->cfg.pc9821 || m->cfg.video_colors == 256; }   // 256 色のグラフィックがある機械
 // F00000h-F7FFFFh に VRAM 全体を見せる（E0102h bit0）。プロテクトモードのソフトが使う

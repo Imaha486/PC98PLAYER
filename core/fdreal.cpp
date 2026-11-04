@@ -498,6 +498,7 @@ public:
             size_t k = (size_t)(std::lower_bound(flux_time.begin(), flux_time.end(), it) - flux_time.begin());
             index.push_back(k);
         }
+        last_flux_ns = flux; last_index = index;   // SCP で書き出すとき用（直前のトラックだけ）
         int md = -1;
         bool ok = fdflux::decode_flux(flux, index, cyl, head, out, &md);
         if (cyl == 0 && head == 0 && md >= 0) {
@@ -513,6 +514,13 @@ public:
         if (motor && now - last_use > 3000) motor_off();
     }
     std::string last_error() const override { return err; }
+    std::vector<float> last_flux_ns;
+    std::vector<size_t> last_index;
+    bool has_flux() const override { return true; }
+    bool last_flux(std::vector<float>& f, std::vector<size_t>& ix) const override {
+        if (last_flux_ns.empty()) return false;
+        f = last_flux_ns; ix = last_index; return true;
+    }
 };
 
 #ifdef _WIN32

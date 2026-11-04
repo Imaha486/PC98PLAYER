@@ -735,6 +735,7 @@ uint8_t io_in8(Machine* m, uint16_t port) {
     return v;
 }
 uint8_t io_in8_(Machine* m, uint16_t port) {
+    if ((port < 0x28 && (port & 1)) || (port >= 0x90 && port <= 0x94)) { uint8_t fv; if (fdc_io_in(m, port, &fv)) return fv; }   // DMA・1MB の FDC
     { uint8_t pv; if ((port == 0x9A0 || port == 0x9A8 || (port >= 0xA8 && port <= 0xAE)) && pegc_io_in(m, port, &pv)) return pv; }
     switch (port) {
     case 0x00: return pic_read(m, 0, 0);
@@ -804,6 +805,7 @@ void io_out8(Machine* m, uint16_t port, uint8_t v) {
     if (g_dbg_on) dbg_note_io(m, port, v, true, false);
     if (port >= g_trace_port_lo && port <= g_trace_port_hi && s_port_log++ < 3000) plog("[out] %04X <- %02X @%04X:%04X\n", port, v, m->cpu.op_cs, m->cpu.op_ip);
     if ((port == 0x6A || port == 0x9A0 || port == 0x9A8 || (port >= 0xA8 && port <= 0xAE)) && pegc_io_out(m, port, v)) return;   // PC-9821 の 256 色
+    if (((port < 0x28 && (port & 1)) || (port >= 0x90 && port <= 0x94)) && fdc_io_out(m, port, v)) return;   // DMA・1MB の FDC
     switch (port) {
     case 0x00: pic_write(m, 0, 0, v); return;
     case 0x02: pic_write(m, 0, 1, v); return;
@@ -1035,6 +1037,7 @@ static void advance(Machine* m, uint32_t t) {
         m->fd_irq_wait[u] = (int32_t)(MASTER_CLOCK / 30);   // 抜いてから入れるまで少し間をあける
     }
 
+    fdc_advance(m, t);
     // 垂直同期
     uint32_t before = m->frame_pos;
     m->frame_pos += t;
@@ -1085,6 +1088,7 @@ Machine* machine_create(const Config& cfg) {
     memset(m->gvram, 0, sizeof(m->gvram));
     pegc_clear(m);
     avsfm_reset(m);
+    fdc_reset(m);
     { extern int g_idle_skip; g_idle_skip = (cfg.idle_skip && !getenv("PC98PLAYER_NOIDLE")) ? 1 : 0; }
     m->cpu_hz = (uint32_t)cfg.cpu_mhz * 1000000u;
     if (m->cpu_hz < 1000000u) m->cpu_hz = 8000000u;

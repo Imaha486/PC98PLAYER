@@ -545,7 +545,36 @@ static void fd_save_d88() {
     else g_menu_note = L"保存できませんでした: " + W(err);
     InvalidateRect(g_hwnd, nullptr, FALSE);
 }
-// 「入れる」のメニュー: イメージファイル / 実機のドライブ / 読み直し / D88 で保存
+// Greaseweazle のディスクを、磁気の記録のまま SCP で保存する（全トラックを読み直すので 1〜3 分かかる）。
+// 読む時間でディスクを確かめるソフトは、D88 では動かず、SCP なら動く
+static bool scp_progress(int done, int total, void*) {
+    wchar_t t[96]; swprintf(t, 96, L"PC98PLAYER ― SCP で保存しています… %d / %d トラック（Esc でやめる）", done, total);
+    SetWindowTextW(g_hwnd, t);
+    MSG msg;
+    bool cancel = false;
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE) cancel = true;
+        else if (msg.message == WM_QUIT) { PostQuitMessage((int)msg.wParam); cancel = true; }
+        else if (msg.message == WM_PAINT || msg.message == WM_TIMER) DispatchMessageW(&msg);   // 入力は捨てる（ゲームへ送らない）
+    }
+    return !cancel;
+}
+static void fd_save_scp() {
+    FloppyImage* im = fd_img();
+    if (!im || !im->src || !im->src->has_flux()) { g_menu_note = L"Greaseweazle で読んでいるディスクだけ SCP で保存できます"; InvalidateRect(g_hwnd, nullptr, FALSE); return; }
+    std::wstring file;
+    if (!pick_file(g_hwnd, true, W(g_p->ps.cfg.root), L"DISK.SCP", {{L"SCP イメージ (*.scp)", L"*.scp"}},
+                   L"今のディスクを SCP（磁気の記録のまま）で保存", L"scp", &file)) return;
+    HCURSOR old = SetCursor(LoadCursor(nullptr, IDC_WAIT));
+    std::string err;
+    bool ok = im->save_scp(U(file), &err, scp_progress, nullptr);
+    SetCursor(old);
+    update_title();
+    if (ok) { show_toast(L"SCP で保存しました"); menu_close(); }
+    else g_menu_note = L"保存できませんでした: " + W(err);
+    InvalidateRect(g_hwnd, nullptr, FALSE);
+}
+// 「入れる」のメニュー: イメージファイル / 実機のドライブ / 読み直し / D88 で保存 / SCP で保存
 // フォルダを選ぶ（IFileDialog のフォルダ選び）
 static bool pick_folder(HWND owner, const std::wstring& start, const std::wstring& title, std::wstring* out) {
     HRESULT ci = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
@@ -605,6 +634,7 @@ static void fd_menu(bool at_mouse) {
     AppendMenuW(mnu, MF_STRING | ((im && im->src) ? 0 : MF_GRAYED), 3, L"読み直す（実機のディスクを入れ替えた）");
     AppendMenuW(mnu, MF_STRING | (im ? 0 : MF_GRAYED) | (im && im->wprot ? MF_CHECKED : 0), 6, L"書き込み禁止（ライトプロテクト）");
     AppendMenuW(mnu, MF_STRING | (im ? 0 : MF_GRAYED), 4, L"今のディスクを D88 で保存…");
+    AppendMenuW(mnu, MF_STRING | ((im && im->src && im->src->has_flux()) ? 0 : MF_GRAYED), 7, L"今のディスクを SCP（磁気の記録のまま）で保存…");
     POINT pt;
     if (at_mouse) GetCursorPos(&pt);
     else { RECT rc; GetClientRect(g_hwnd, &rc); pt.x = rc.right / 2; pt.y = rc.bottom / 2; ClientToScreen(g_hwnd, &pt); }
@@ -620,6 +650,7 @@ static void fd_menu(bool at_mouse) {
         show_toast(L"ディスクを読み直しました"); menu_close();
     }
     else if (id == 4) fd_save_d88();
+    else if (id == 7) fd_save_scp();
     else if (id == 6 && im) {   // 書き込み禁止のつまみ（実機のドライブで書けないものは解除できない）
         if (im->wprot && im->src && !im->src->writable()) g_menu_note = L"このドライブには書き込めません";
         else {

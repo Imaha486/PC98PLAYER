@@ -28,6 +28,7 @@ struct FdSector {
     int64_t  file_off;            // イメージ内のデータの位置（-1 = 書き戻せない）
     int      copies;              // NFD r1 の再試行データの数（1 以上）
     int      next_copy;           // 次に返す再試行データ
+    double   data_us = 0;         // データ部を読むのにかかる時間（µs。フラックスのイメージで測ったもの。0 = 分からない）
 };
 
 // READ DIAGNOSTIC（ID を見ずにトラックの先頭から読む）の結果を記録したもの（NFD r1）
@@ -55,6 +56,10 @@ struct FdSource {
     virtual bool writable() const { return false; }
     virtual void idle(uint32_t now_ms) { (void)now_ms; }   // しばらく使わなければモーターを止める等
     virtual std::string last_error() const { return ""; }
+    // 磁気の記録（フラックス）をそのまま渡せる元か（Greaseweazle）。渡せるなら、直前の fetch で読んだ
+    // 反転の間隔（ns）と、索引穴の位置（flux の添字。最初の索引から）を返す
+    virtual bool has_flux() const { return false; }
+    virtual bool last_flux(std::vector<float>& flux_ns, std::vector<size_t>& index) const { (void)flux_ns; (void)index; return false; }
     int media_hint = -1;          // 分かった媒体（FD_2HD 等。-1 = 不明）
     int cyl_hint = 0;             // 分かったシリンダ数（0 = 不明）
 };
@@ -83,6 +88,9 @@ public:
     bool check_media_change();  // 実機: トラック 0 を読み直して、ディスクが替わっていたら覚えている中身を捨てる
     // 全トラックを読み（実機なら読みに行き）D88 で書き出す
     bool save_d88(const std::string& out_path, std::string* err);
+    // 磁気の記録のまま SCP で書き出す（has_flux() の元だけ）。全トラックを読み直す。
+    // progress(済んだトラック数, 全トラック数) が false を返したら途中でやめる
+    bool save_scp(const std::string& out_path, std::string* err, bool (*progress)(int done, int total, void* user), void* user);
     FdSector* find(int cyl, int head, uint8_t c, uint8_t h, uint8_t r, uint8_t n);
     // セクタへ書く（イメージへも反映）。失敗なら false
     bool write_sector(FdSector* s, const uint8_t* buf, int len);
