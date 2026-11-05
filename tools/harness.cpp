@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <string>
+#include <chrono>
 #include <vector>
 #include <set>
 #include <time.h>
@@ -171,7 +172,14 @@ int main(int argc, char** argv) {
             bool ok = im && im->save_scp(scp_path, &er, [](int d, int t, void*) { if (d % 40 == 0) fprintf(stderr, "scp %d/%d\n", d, t); return true; }, nullptr);
             fprintf(stderr, "scpsave %s: %s\n", scp_path.c_str(), ok ? "ok" : er.c_str());
         }
-        if (getenv("PERFREP") && f % 282 == 0) { void perf_report(Machine* m); perf_report(p->m); }
+        if (getenv("PERFREP") && f % 282 == 0) {
+            static auto t0 = std::chrono::steady_clock::now(); static int64_t c0 = 0;
+            auto t1 = std::chrono::steady_clock::now();
+            extern int64_t g_burn_cycles; static int64_t b0 = 0;
+            fprintf(stderr, "[perfh] frame %d: %.1f ms / 282 frames, cycles %.1fM (burn %.1fM)\n", f, std::chrono::duration<double, std::milli>(t1 - t0).count(), (p->m->cpu.cycles - c0) / 1e6, (g_burn_cycles - b0) / 1e6);
+            t0 = t1; c0 = p->m->cpu.cycles; b0 = g_burn_cycles;
+            void perf_report(Machine* m); perf_report(p->m);
+        }
         if (!wav.empty()) pcm.insert(pcm.end(), p->audio.begin(), p->audio.end());
         if (shot) {
             char fn[256]; snprintf(fn, sizeof(fn), "%s_%05d.ppm", out.c_str(), f);

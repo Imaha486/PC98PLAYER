@@ -90,6 +90,7 @@ Scale=2              ; 表示倍率（1 で 640x400）
 FullScreen=0         ; 起動時に全画面
 Smooth=0             ; 拡大をなめらかに
 CpuMHz=16            ; 仮想 CPU の速さ
+CpuThrottle=1        ; 1: パソコンが追いつかないときは CPU の速さを自動で下げる（音の途切れを防ぐ）
 Drive=A              ; ゲームのフォルダを何ドライブに見せるか
 SoundBoard=86        ; 86 / 26 / 0（なし）
 SoundBIOS=0          ; 1 でサウンド BIOS（CC00h・INT D2h）を載せる（MIMPI の FM 演奏など。音色は自前）

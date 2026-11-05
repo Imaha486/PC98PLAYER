@@ -323,6 +323,7 @@ struct AudioOut {
     }
 };
 static AudioOut g_audio;
+double g_cpu_scale_now = 1.0;   // CPU のクロックの自動調整の倍率（表示用）
 static void midi_all_off();
 static void audio_flush() { if (g_audio.h) { waveOutReset(g_audio.h); g_audio.reap(); } midi_all_off(); }
 
@@ -373,8 +374,18 @@ static void set_capture(bool on) {
     update_title();
 }
 
+static int g_title_mhz = 0;   // タイトルに出している CPU の速さ（MHz。0 = まだ）
 static void update_title() {
     std::wstring t = g_title;
+    if (g_p && g_p->m) {   // CPU の速さ（自動調整で下げているときは「いま / 設定」）
+        int set = g_p->ps.cfg.cpu_mhz > 0 ? g_p->ps.cfg.cpu_mhz : 8;
+        int now = (int)((g_p->m->cpu_hz + 500000u) / 1000000u);
+        g_title_mhz = now;
+        wchar_t b[48];
+        if (now < set) swprintf(b, 48, L"  [CPU %d/%dMHz]", now, set);
+        else swprintf(b, 48, L"  [CPU %dMHz]", set);
+        t += b;
+    }
     t += L"  [F11: ロード / Shift+F11: セーブ]";
     if (g_mouse_lock_disable) {}
     else if (g_mouse_shared) t += L"  [マウス: 画面の上で動かす]";
@@ -1180,6 +1191,8 @@ static void write_template_ini(const std::wstring& path, const std::string& star
         "Smooth=0\r\n"
         "; 仮想 CPU の速さ（MHz 相当）\r\n"
         "CpuMHz=16\r\n"
+        "; 1 でパソコンが追いつかないときは CPU の速さを自動で下げる（音の途切れを防ぐ）。0 で常に CpuMHz= のまま\r\n"
+        ";CpuThrottle=1\r\n"
         "; グラフィック GDC のクロック（DIP SW 2-8）。2.5 / 5。「GDC を 5MHz にしてください」と出るソフトは 5\r\n"
         "GDCClock=2.5\r\n"
         "; ゲームのフォルダを何ドライブに見せるか\r\n"
@@ -1961,6 +1974,29 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
             }
         }
         QueryPerformanceCounter(&pf2);
+        {   // CPU のクロックの自動調整（CpuThrottle=1）: PC が 1 フレームの間に CPU の命令を実行しきれないと、
+            // 音が尽きて途切れ、全体が遅くなる。そのときは実行するクロックを下げ、余裕が戻れば設定の値まで戻す。
+            // 時計（タイマー・垂直同期）は実時間のまま進むので、待ちの多いソフトはほぼ同じに動く
+            static double s_scale = 1.0, s_avg = 0;
+            uint32_t base = (uint32_t)(g_p->ps.cfg.cpu_mhz > 0 ? g_p->ps.cfg.cpu_mhz : 8) * 1000000u;
+            if (g_p->ps.cfg.cpu_throttle && !g_turbo) {
+                double emu = (pf2.QuadPart - pf1.QuadPart) * 1000.0 / (double)freq.QuadPart;
+                s_avg = s_avg * 0.9 + emu * 0.1;
+                double budget = frame_sec * 1000.0 * 0.8;
+                if (s_avg > budget) s_scale *= 0.94;
+                else if (s_avg < budget * 0.6) s_scale *= 1.02;
+                if (s_scale < 0.15) s_scale = 0.15;
+                if (s_scale > 1.0) s_scale = 1.0;
+                uint32_t hz = (uint32_t)(base * s_scale);
+                if (hz < 8000000u && base >= 8000000u) hz = 8000000u;   // 8MHz より下げない
+                g_p->m->cpu_hz = hz;
+            } else if (g_p->m->cpu_hz != base) { g_p->m->cpu_hz = base; s_scale = 1.0; }
+            extern double g_cpu_scale_now; g_cpu_scale_now = s_scale;
+            // タイトルの CPU の速さ: 表示する値が変わったときだけ、0.5 秒に 1 回まで書き換える（負荷はほぼ無い）
+            static LONGLONG s_title_t = 0;
+            int mhz = (int)((g_p->m->cpu_hz + 500000u) / 1000000u);
+            if (mhz != g_title_mhz && pf2.QuadPart - s_title_t > freq.QuadPart / 2) { s_title_t = pf2.QuadPart; update_title(); }
+        }
         next += frame_sec;
         if (t - next > 0.25) next = t;
         HDC dc = GetDC(g_hwnd);
@@ -1983,8 +2019,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
                 if (g_p->ps.cfg.trace && !g_turbo) {
                     plog("[perf] %.1f 秒で %d フレーム（実機は %.0f フレーム）。1 フレーム（%.1f ms）あたり: エミュレーション %.2f ms（CPU と周辺 %.2f ms・音の合成 %.2f ms）・画面 %.2f ms・ゲームパッド %.2f ms（最大 %.1f ms）。音の途切れ %d 回\n",
                          el / 1000.0, s_n, el / 1000.0 / frame_sec, frame_sec * 1000.0, s_emu / s_n, s_cpu / s_n, s_snd / s_n, s_draw / s_n, s_pad / s_n, s_max, s_under);
-                    plog("[perf]   CPU %d MHz: 1 フレームに %.2f M クロック実行（空回りを飛ばした回数 %u）\n",
-                         g_p->ps.cfg.cpu_mhz, s_cyc0 ? (double)(cyc - s_cyc0) / s_n / 1e6 : 0.0, g_spin_hits - s_spin0);
+                    plog("[perf]   CPU %d MHz（いま %.0f MHz）: 1 フレームに %.2f M クロック実行（空回りを飛ばした回数 %u）\n",
+                         g_p->ps.cfg.cpu_mhz, g_p->m->cpu_hz / 1e6, s_cyc0 ? (double)(cyc - s_cyc0) / s_n / 1e6 : 0.0, g_spin_hits - s_spin0);
                 }
                 { void perf_report(Machine* m); perf_report(g_p->m); }
                 s_cyc0 = cyc; s_spin0 = g_spin_hits;

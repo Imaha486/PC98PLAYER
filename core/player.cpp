@@ -134,6 +134,7 @@ bool player_settings_from_ini(const Ini& ini, const std::string& root, PlayerSet
     ps->cfg.memory_kb = I("MEMORYKB", 640);
     ps->cfg.emulate_mouse = I("MOUSEDRIVER", 1) != 0;
     ps->cfg.idle_skip = I("IDLESKIP", 1) != 0;
+    ps->cfg.cpu_throttle = I("CPUTHROTTLE", 1) != 0;
     ps->cfg.trace = I("TRACE", 0);
     ps->cfg.load_devices = I("LOADDEVICES", 1) != 0;
     { std::string av = G("AVSDRV", ""); ps->cfg.avsdrv = av.empty() ? -1 : (I("AVSDRV", 1) ? 1 : 0); }   // 0: CONFIG.SYS の DEVICE= のドライバを組み込まない

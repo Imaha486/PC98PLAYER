@@ -5,6 +5,6 @@
 #pragma once
 #define PC98P_VER_Y   26
 #define PC98P_VER_M   11
-#define PC98P_VER_D   4
+#define PC98P_VER_D   5
 #define PC98P_VER_REV 0
-#define PC98P_VER_STR "261104"
+#define PC98P_VER_STR "261105"

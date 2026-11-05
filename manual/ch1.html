@@ -355,6 +355,7 @@ Start=A:\AUTOEXEC.BAT</pre>
 <table>
   <tr><th>項目</th><th>既定値</th><th>説明</th></tr>
   <tr><td><code>CpuMHz=</code></td><td>16</td><td>仮想 CPU の速さ（MHz 相当）。命令の重さは 386 程度で数えているため、i486DX2（66MHz）推奨のソフトは 100〜133 くらいが目安です。上げるほどパソコン側の負荷が増えます。</td></tr>
+  <tr><td><code>CpuThrottle=</code></td><td>1</td><td>1: パソコンが 1 フレームの間に CPU の命令を実行しきれないとき（<code>CpuMHz=</code> を大きくしたときなど）、CPU の速さを自動で下げ、余裕が戻れば設定の速さまで戻す（音の途切れと処理落ちを防ぐ。タイマーと画面の同期は実時間のまま進みます）。0: いつも <code>CpuMHz=</code> の速さで動かす（CPU の速さで遊ぶ速さが変わるソフト向け）。</td></tr>
   <tr><td><code>IdleSkip=</code></td><td>1</td><td>1: ゲームが割込みや画面の同期（GDC のステータス）を待って同じところを回っているだけのとき、その間の命令を実行せずに待つ（結果は変わらず、早送りが速くなり、パソコンの負荷も下がります）。0: しない（おかしな動きをするときの確認用）。</td></tr>
   <tr><td><code>MouseSpeed=</code></td><td>100</td><td>マウスの速さ（%）。</td></tr>
   <tr><td><code>MouseDriver=</code></td><td>1</td><td>1: マウスドライバ（MOUSE.COM 相当）を用意する。0: 用意しない。</td></tr>

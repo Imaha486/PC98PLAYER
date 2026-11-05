@@ -230,6 +230,7 @@ struct Config {
     int      memory_kb = 640;
     bool     emulate_mouse = true;
     bool     idle_skip = true;       // 割込み待ちの空回りを止めて待つ（IdleSkip=）
+    bool     cpu_throttle = true;    // PC が追いつかないときは CPU のクロックを自動で下げる（CpuThrottle=）
     int      key_repeat = 1;
     int      trace = 0;
     int      dos_version = 0x0500;   // 5.00（上位=メジャー）

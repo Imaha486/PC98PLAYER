@@ -135,6 +135,7 @@ const SCHEMA = [
   ]},
   { title: "CPU・メモリ・DOS", items: [
     { key: "CpuMHz", label: "CPU の速さ", type: "number", def: "16", min: 1, max: 1000, unit: "MHz 相当", help: "i486DX2 推奨のソフトは 100〜133 くらいが目安。上げるほどパソコンの負荷が増えます。" },
+    { key: "CpuThrottle", label: "CPU の速さの自動調整", type: "check", def: "1", on: "1", off: "0", text: "パソコンが追いつかないときは CPU の速さを自動で下げる", help: "速い CPU の設定で音が途切れる・処理落ちするのを防ぎます。CPU の速さで遊ぶ速さが変わるソフトでは外してください。" },
     { key: "IdleSkip", label: "待ちの空回りを飛ばす", type: "check", def: "1", on: "1", off: "0", text: "割込み待ちの間は命令を実行せずに待つ", help: "おかしな動きをするときの確認用に外せます。" },
     { key: "MemoryKB", label: "通常メモリ", type: "number", def: "640", min: 128, max: 640, unit: "KB" },
     { key: "EMS", label: "EMS", type: "check", def: "1", on: "1", off: "0", text: "EMS（EMM386 相当）を用意する", help: "INI に EMS= を書かないときは、ゲームのフォルダの CONFIG.SYS の EMM386 に NOEMS があれば EMS を出しません。「すべての項目を書く」で EMS=1 を書くと、CONFIG.SYS にかかわらず EMS を出します。" },
