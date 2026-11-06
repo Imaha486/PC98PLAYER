@@ -152,7 +152,7 @@ JoyRapid=4           ; 連射の速さ（何フレームごとに切り替える
 
 INI を書き換えたら、**F11 → R（プログラム再起動）** で INI を読み直して起動し直します（PC98PLAYER を閉じずに設定を試せます。FloppyDisk= / FloppyImage= は変えたときだけ入れ替え）。
 
-INI は Shift_JIS でも UTF-8 でも構いません。`samples\` に例があります（ランス３の 2 ドライブ構成は `rance3.INI`、Greaseweazle で吸い出したキーディスクを使うスレイヤーズ！は `slayers.INI`、CD-ROM 版の ISO イメージで遊ぶ例は `ed4_98cdrom.ini`、CUE シートで CD-DA も鳴らす例は `konpeki2pf_install.ini`（インストール用）と `konpeki2pf.ini`（実行用））。
+INI は Shift_JIS でも UTF-8 でも構いません。`samples\` に例があります（ランス３の 2 ドライブ構成は `rance3.INI`、Greaseweazle で吸い出したキーディスクを使うスレイヤーズ！は `slayers.INI`、CD-ROM 版の ISO イメージで遊ぶ例は `ed4_98cdrom.ini`、CUE シートで CD-DA も鳴らす例は `konpeki2pf_install.ini`（インストール用）と `konpeki2pf.ini`（実行用）、PC-9821 の 256 色で CD-ROM 版をインストールして遊ぶ例は `puyo2_install.ini` と `puyo2.ini`）。
 
 ## 操作
 

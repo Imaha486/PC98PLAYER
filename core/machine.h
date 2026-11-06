@@ -354,6 +354,7 @@ struct Machine {
     uint8_t  modeff[8];         // 68h
     uint8_t  modeff2[8];        // 6Ah の各 bit
     uint8_t  gfx_200;           // 200 ライン表示
+    uint8_t  s31_rate = 0;      // INT 18h AH=30h で選んだ水平周波数（1 = 31kHz）
     uint8_t  gfx_200_lower;     // 200 ラインで下半分を表示
     uint8_t  gfx_color;         // カラー / モノクロ
     uint8_t  gdc_clk5;          // グラフィック GDC がいま 5MHz（PITCH はバイト単位＝ 8 ドット）。0 = 2.5MHz（ワード単位）

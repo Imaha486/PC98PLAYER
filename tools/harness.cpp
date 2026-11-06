@@ -167,6 +167,10 @@ int main(int argc, char** argv) {
             if (f == from) { g_trace_port_lo = saved_lo; g_trace_port_hi = saved_hi; } } }
         bool shot = shots.count(f) > 0 || f == frames - 1; bool rend = shot || getenv("RENDERALL");
         p->run_frame(rend, !getenv("NOAUDIO"));
+        if (getenv("FRAMEHASH") && rend) {   // 画面が変わったフレームを数える（動きのなめらかさを見る）
+            uint64_t h = 1469598103934665603ull; for (int i = 0; i < 640 * p->fb_h; i++) { h ^= p->fb[i]; h *= 1099511628211ull; }
+            fprintf(stderr, "[fh] %d %016llx\n", f, (unsigned long long)h);
+        }
         if (f == scp_f && !scp_path.empty()) {
             FloppyImage* im = floppy::image_unit(0); std::string er;
             bool ok = im && im->save_scp(scp_path, &er, [](int d, int t, void*) { if (d % 40 == 0) fprintf(stderr, "scp %d/%d\n", d, t); return true; }, nullptr);

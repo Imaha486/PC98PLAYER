@@ -186,6 +186,8 @@ bool ems_frame_hit(uint32_t a) {      // ページフレームの中
     uint32_t lo = lin(EMS_FRAME_SEG, 0);
     return a >= lo && a < lo + 4 * EMS_PAGE;
 }
+// この 16KB（a はその先頭）を、メモリの中身そのものとして読み書きしてよいか（EMS のページフレームか、外に割り当てた EMS）
+bool ems_fast_block(uint32_t a) { return ems_frame_hit(a) || ems_upper_mapped(a); }
 static uint8_t* page_ptr(int h, int l) {
     if (h < 0 || (size_t)h >= s_ems.size() || !s_ems[h].used) return nullptr;
     if ((size_t)(l + 1) * EMS_PAGE > s_ems[h].data.size()) return nullptr;
@@ -204,7 +206,9 @@ static void ems_reload_all(Machine* m) {
 //（割り当てのたびに 8 ページ全部を書き戻すと、頻繁に切り替えるソフトで非常に重くなる）。
 // 新しく割り当てる論理ページが、変わらない別の物理ページにも見えているときは、先にそちらを書き戻して
 // 最新の中身を読み込む。
+extern uint32_t g_ems_map_gen;
 static void ems_remap(Machine* m, const int32_t want[8][2]) {
+    g_ems_map_gen++;
     bool chg[8];
     for (int p = 0; p < 8; p++) chg[p] = slot(p)[0] != want[p][0] || slot(p)[1] != want[p][1];
     for (int p = 0; p < 8; p++) if (chg[p]) ems_flush(m, p);
@@ -230,6 +234,7 @@ static uint8_t ems_map(Machine* m, int p, int h, int l) {
     return 0;
 }
 static void ems_unmap_handle(Machine* m, int h) {
+    g_ems_map_gen++;
     for (int p = 0; p < 8; p++) if (slot(p)[0] == h) { ems_flush(m, p); slot(p)[0] = slot(p)[1] = -1; }
 }
 
@@ -363,7 +368,7 @@ static void ems_call(Machine* m) {
         if (n > cur && n - cur > ems_free_pages()) { ret(0x88); return; }
         ems_flush_all(m);
         e->data.resize((size_t)n * EMS_PAGE, 0);
-        for (int p = 0; p < 8; p++) if (slot(p)[0] == h && slot(p)[1] >= (int)n) slot(p)[0] = slot(p)[1] = -1;
+        g_ems_map_gen++; for (int p = 0; p < 8; p++) if (slot(p)[0] == h && slot(p)[1] >= (int)n) slot(p)[0] = slot(p)[1] = -1;
         SETBX(m, (uint16_t)n); ret(0); return; }
     case 0x52: if (AL(m) == 0x00) { SETAL(m, 0); ret(0); } else if (AL(m) == 0x01) ret(0); else if (AL(m) == 0x02) { SETAL(m, 0); ret(0); } else ret(0x8F); return;
     case 0x53: {
@@ -453,7 +458,7 @@ void xmsems_init(Machine* m) {
     s_hma_used = false;
     s_ems.clear(); s_ems.resize(1); s_ems[0].used = true;   // ハンドル 0（システム用、0 ページ）
     s_ems_total_pages = m->cfg.ems ? (uint32_t)(m->cfg.ems_kb / 16) : 0;
-    for (int p = 0; p < 8; p++) slot(p)[0] = slot(p)[1] = -1;
+    g_ems_map_gen++; for (int p = 0; p < 8; p++) slot(p)[0] = slot(p)[1] = -1;
     if (m->cfg.ems_from_config) plog("[ems] ゲームの CONFIG.SYS に NOEMS があるので、EMS は出しません（INI に EMS=1 と書けば出します）\n");
     // XMS の入口: F1 E0 / RETF
     {
@@ -495,7 +500,7 @@ void xmsems_state_load(Machine* m, StateR& r) {
     if (!r.peek_tag("XMEM")) {         // 旧形式のステートには無い: 空にしておく
         s_xms.assign(1, XmsBlock()); s_hma_used = false;
         s_ems.assign(1, EmsHandle()); s_ems[0].used = true;
-        for (int p = 0; p < 8; p++) slot(p)[0] = slot(p)[1] = -1;
+        g_ems_map_gen++; for (int p = 0; p < 8; p++) slot(p)[0] = slot(p)[1] = -1;
         (void)m; return;
     }
     r.tag("XMEM");
@@ -509,5 +514,6 @@ void xmsems_state_load(Machine* m, StateR& r) {
     r.bytes(s_frame, sizeof(s_frame));
     if (r.peek_tag("EMSC")) { r.tag("EMSC"); r.bytes(s_cframe, sizeof(s_cframe)); }
     else for (int p = 0; p < 4; p++) s_cframe[p][0] = s_cframe[p][1] = -1;
+    g_ems_map_gen++;
     // フレームの中身は RAM ごと復元済み
 }

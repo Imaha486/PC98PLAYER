@@ -62,7 +62,18 @@ static bool d_o32;
 static inline int vsz_of() { return d_o32 ? 32 : 16; }
 
 // ---- フェッチ ---------------------------------------------------------------
+// 命令の頭で、命令のバイトがふつうの RAM の中に収まると分かっていれば、そこを直接読む（s_fp[ip]）。
+// 命令は最長 15 バイトなので、頭から 16 バイト先まで RAM で、IP が折り返さないときだけ使う
+static const uint8_t* s_fp; static uint16_t s_fp_cs; static uint32_t s_fp_ip0;
+static inline void fetch_setup() {
+    s_fp = nullptr;
+    uint32_t ip = C->ip;
+    if (!s_cs32 && ip > 0xFFF0u) return;
+    uint32_t a = (sbase(CS_) + ip) & g_addr_mask;
+    if (a + 16 <= 0xA0000u || (a >= 0x100000u && a + 16 <= g_ram_top)) { s_fp = g_ram + a - ip; s_fp_cs = C->sr[CS_]; s_fp_ip0 = ip; }
+}
 static inline uint8_t f8() {
+    if (s_fp && C->ip - s_fp_ip0 < 16u && C->sr[CS_] == s_fp_cs) return s_fp[C->ip++];
     uint8_t v = mem_rb(M, sbase(CS_) + C->ip);
     C->ip = (C->ip + 1) & ipmask();
     return v;
@@ -497,6 +508,44 @@ static void string_op(uint8_t op, int sz) {
     bool rep = d_rep != 0;
     uint32_t n = rep ? cx_() : 1;
     if (rep && n == 0) return;
+    // REP MOVS / REP STOS（前向き）: 読み書きの先がただのメモリなら、要素ごとにメモリの入口を通らずにまとめて動かす。
+    // 1 要素ずつ順に進めるのと同じ結果になるように、重なって前へ書き写すときは 1 バイトずつ写す
+    if (rep && delta > 0 && (op == 0xA4 || op == 0xA5 || op == 0xAA || op == 0xAB)
+#ifdef PC98P_WATCH
+        && g_watch_hi <= g_watch_lo
+#endif
+        ) {
+        bool mov = op == 0xA4 || op == 0xA5;
+        uint32_t val = getr(sz, EAX);
+        while (n) {
+            uint32_t k = n;
+            uint32_t s_off = si_(), d_off2 = di_();
+            if (!d_a32) {
+                uint32_t kd = (0x10000u - d_off2) / (uint32_t)bytes; if (kd < k) k = kd;
+                if (mov) { uint32_t ks = (0x10000u - s_off) / (uint32_t)bytes; if (ks < k) k = ks; }
+            }
+            uint32_t sa = 0xFFFFFFFFu, da = 0;
+            uint32_t sl = sbase(sseg) + s_off, dl = sbase(ES_) + d_off2;
+            uint8_t* dp = k ? mem_span(dl, &da, true) : nullptr;
+            uint8_t* sp = (dp && mov) ? mem_span(sl, &sa, false) : nullptr;
+            if (dp) { if (da / (uint32_t)bytes < k) k = da / (uint32_t)bytes; if (mov && sa / (uint32_t)bytes < k) k = sa / (uint32_t)bytes; }
+            if (mov && sp && g_probe_addr - lin_mask(sl) < k * (uint32_t)bytes) sp = nullptr;   // 調べる番地を読む
+            if (!dp || (mov && !sp) || !k) break;   // ここからは 1 要素ずつ（下のふつうの道）
+            uint32_t tot = k * (uint32_t)bytes;
+            if (mov) {
+                if (dp > sp && dp < sp + tot) for (uint32_t i = 0; i < tot; i++) dp[i] = sp[i];
+                else memmove(dp, sp, tot);
+            } else {
+                for (uint32_t i = 0; i < tot; i++) dp[i] = (uint8_t)(val >> (8 * (i % (uint32_t)bytes)));
+            }
+            g_side_fx++;
+            if (mov) adv(ESI, (int)tot);
+            adv(EDI, (int)tot);
+            n -= k; setcx(n);
+            d_cyc += 3 * (int)k;
+        }
+        if (n == 0) return;
+    }
     for (;;) {
         switch (op) {
         case 0xA4: case 0xA5: wrm(sz, sbase(ES_) + di_(), rdm(sz, sbase(sseg) + si_())); adv(ESI, delta); adv(EDI, delta); break;
@@ -862,7 +911,8 @@ static void itr_dump() {
     for (unsigned i = 0; i < 256; i++) { uint32_t v = g_itr[(g_itr_pos + i) & 255]; fprintf(stderr, " %04X:%04X", v >> 16, v & 0xFFFF); if ((i & 7) == 7) fprintf(stderr, "\n"); }
 }
 int g_snap_cs = -1; const char* g_snap_path = nullptr; extern uint8_t* g_ram;
-static void step() {
+static int s_dbg_any;   // 下の調べもののどれかが動いている（cpu_run の区切りと、INT の追跡を始めたときに決める）
+static void step_debug() {
     if (g_snap_cs >= 0 && C->sr[CS_] == (uint16_t)g_snap_cs && g_ram) {
         FILE* o = fopen(g_snap_path, "wb"); if (o) { fwrite(g_ram, 1, 0x100000, o); fclose(o); }
         fprintf(stderr, "[snap] CS=%04X IP=%04X AX=%04X\n", C->sr[CS_], C->ip, (unsigned)(C->r[EAX] & 0xFFFF)); g_snap_cs = -1;
@@ -878,10 +928,14 @@ static void step() {
     }
     if (s_tr_on && g_trace_full > 0 && !(C->ip == s_tr_ip && C->sr[CS_] == s_tr_cs)) fprintf(stderr, "  %04X:%04X AX=%04X BX=%04X CX=%04X DX=%04X SI=%04X DI=%04X DS=%04X ES=%04X\n", C->sr[CS_], C->ip, C->r[EAX] & 0xFFFF, C->r[EBX] & 0xFFFF, C->r[ECX] & 0xFFFF, C->r[EDX] & 0xFFFF, C->r[ESI] & 0xFFFF, C->r[EDI] & 0xFFFF, C->sr[DS_], C->sr[ES_]);
     if (s_tr_on && C->ip == s_tr_ip && C->sr[CS_] == s_tr_cs) { s_tr_on = 0; if (g_trace_full > 0) g_trace_full--; fprintf(stderr, "   -> AX=%04X BX=%04X CX=%04X DX=%04X FL=%04X\n", C->r[EAX] & 0xFFFF, C->r[EBX] & 0xFFFF, C->r[ECX] & 0xFFFF, C->r[EDX] & 0xFFFF, C->fl & 0xFFFF); }
-    C->op_ip = C->ip; C->op_cs = C->sr[CS_];
     if (g_prof_lin) g_prof_lin[(((uint32_t)C->sr[CS_] << 4) + C->ip) & 0xFFFFF]++;
     if (g_prof) { if (g_prof_cs == -2) g_prof[C->sr[CS_]]++; else if (C->sr[CS_] == g_prof_cs) g_prof[C->ip & 0xFFFF]++; }
+}
+static void step() {
+    if (s_dbg_any) step_debug();
+    C->op_ip = C->ip; C->op_cs = C->sr[CS_];
     s_cs32 = cs32();
+    fetch_setup();
     d_seg = -1; d_o32 = s_cs32; d_a32 = s_cs32; d_rep = 0;
     d_cyc = 2;
     uint8_t op;
@@ -1076,7 +1130,7 @@ static void step() {
             load_seg_real(CS_, (uint16_t)(g_int2f15_redirect >> 16)); C->ip = g_int2f15_redirect & 0xFFFF;
             d_cyc += 40;
             return; }
-        if (v == g_trace_int) { s_tr_cs = C->sr[CS_]; s_tr_ip = C->ip; s_tr_on = 1; }
+        if (v == g_trace_int) { s_tr_cs = C->sr[CS_]; s_tr_ip = C->ip; s_tr_on = 1; s_dbg_any = 1; }
         if (v == g_trace_int) fprintf(stderr, "[f%llu int %02X] AX=%04X BX=%04X CX=%04X DX=%04X DS=%04X ES=%04X from %04X:%04X\n", (unsigned long long)g_frame_dbg, v, C->r[EAX] & 0xFFFF, C->r[EBX] & 0xFFFF, C->r[ECX] & 0xFFFF, C->r[EDX] & 0xFFFF, C->sr[DS_], C->sr[ES_], C->op_cs, C->op_ip);
         do_int(v); return; }
     case 0xCE: if (C->fl & FL_OF) do_int(4); return;
@@ -1178,7 +1232,7 @@ int g_idle_skip = 1;
 extern int g_cpu_yield;
 unsigned g_spin_hits = 0;
 struct SpinSlot {
-    bool valid; uint16_t cs; uint32_t ip; uint32_t fx;
+    bool valid; bool snap; uint16_t cs; uint32_t ip; uint32_t fx;   // snap = r〜stk を取ってある
     uint32_t r[8]; uint16_t sr[6]; uint32_t fl;
     uint16_t stk[8];   // スタックの先頭（戻り先）。積み下ろしは副作用に数えないので、ここで見分ける
 };
@@ -1199,7 +1253,7 @@ static inline bool spin_same(const SpinSlot& s) {
     return true;
 }
 static inline void spin_record(SpinSlot& s) {
-    s.valid = true; s.cs = C->sr[CS_]; s.ip = C->ip; s.fx = g_side_fx;
+    s.valid = true; s.snap = true; s.cs = C->sr[CS_]; s.ip = C->ip; s.fx = g_side_fx;
     for (int i = 0; i < 8; i++) s.r[i] = C->r[i];
     for (int i = 0; i < 6; i++) s.sr[i] = C->sr[i];
     s.fl = C->fl;
@@ -1449,6 +1503,7 @@ static bool next_loads_ss() {
 int cpu_run(Cpu* c, int budget) {
     C = c; M = c->m;
     int used = 0;
+    s_dbg_any = g_snap_cs >= 0 || g_itr_at || g_itr_stop_cs >= 0 || s_tr_on || g_prof_lin || g_prof;
     while (used < budget) {
         if (g_irq_hint && (C->fl & FL_IF) && !C->inhibit_irq && (C->halted || !next_loads_ss())) {
             int v = pic_acknowledge(M);
@@ -1470,9 +1525,15 @@ int cpu_run(Cpu* c, int budget) {
         // 後ろ向きの分岐（ループの戻り）。遠い呼び出しを含む 256 バイトまでのループも見る
         if (C->sr[CS_] == cs0 && C->ip < ip0 && ip0 - C->ip <= 256 && g_idle_skip) {
             SpinSlot& sp = s_spin[(C->ip ^ (C->ip >> 3)) & 7];
-            if (sp.valid && sp.cs == cs0 && sp.ip == C->ip && sp.fx == g_side_fx && spin_same(sp)) {
-                if (C->fl & FL_IF) { C->halted = 2; spin_clear(); used = budget; g_spin_hits++; break; }   // 2 = 空回りで止めた（割込みか、HLE がメモリを書き換えたら再開）
-            } else spin_record(sp);
+            // 1 周の間に外へ影響する読み書きがあったループ（画面を描くループなど）は空回りではないので、
+            // レジスタなどを写し取らずに影響の回数だけ覚え直す（写し取るのは、影響の無い 1 周を見てから）
+            if (sp.valid && sp.cs == cs0 && sp.ip == C->ip) {
+                if (sp.fx != g_side_fx) { sp.fx = g_side_fx; sp.snap = false; }
+                else if (!sp.snap) spin_record(sp);
+                else if (spin_same(sp)) {
+                    if (C->fl & FL_IF) { C->halted = 2; spin_clear(); used = budget; g_spin_hits++; break; }   // 2 = 空回りで止めた（割込みか、HLE がメモリを書き換えたら再開）
+                } else spin_record(sp);
+            } else { sp.valid = true; sp.snap = false; sp.cs = cs0; sp.ip = C->ip; sp.fx = g_side_fx; }
         }
     }
     C->cycles += used;

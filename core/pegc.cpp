@@ -100,6 +100,11 @@ static uint32_t plane_dot0(Machine* m, uint32_t a) {
     uint32_t page = m->pegc.single ? 0 : (uint32_t)(m->draw_bank & 1) * 0x40000;
     return ((a - 0xA8000) * 8 + page) & (VRAM_SIZE - 1);
 }
+// パックドピクセルのときの窓（w=0: A8000h〜、w=1: B0000h〜）の中身の先頭。プレーンモード・256 色でないときは nullptr
+uint8_t* pegc_fast_ptr(Machine* m, int w) {
+    if (!m->pegc.on || (m->pegc.mmio[0x100] & 1)) return nullptr;
+    return m->pegc_vram.data() + bank_base(m, w);
+}
 bool pegc_window(Machine* m, uint32_t a) { return m->pegc.on && a >= 0xA8000 && a < 0xB8000; }
 
 uint16_t pegc_read(Machine* m, uint32_t a, int bytes) {
