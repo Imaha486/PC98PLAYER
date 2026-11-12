@@ -39,6 +39,11 @@ int video_render(Machine* m, uint32_t* out) {
     uint32_t sad1 = (uint32_t)(m->gdcs.pram[0] | (m->gdcs.pram[1] << 8) | ((m->gdcs.pram[2] & 3) << 16));
     uint32_t len1 = (uint32_t)((m->gdcs.pram[2] >> 4) | ((m->gdcs.pram[3] & 0x3F) << 4));
     uint32_t sad2 = (uint32_t)(m->gdcs.pram[4] | (m->gdcs.pram[5] << 8) | ((m->gdcs.pram[6] & 3) << 16));
+    uint32_t sad3 = (uint32_t)(m->gdcs.pram[8] | (m->gdcs.pram[9] << 8) | ((m->gdcs.pram[10] & 3) << 16));
+    uint32_t len2 = (uint32_t)((m->gdcs.pram[6] >> 4) | ((m->gdcs.pram[7] & 0x3F) << 4));
+    uint32_t sad4 = (uint32_t)(m->gdcs.pram[12] | (m->gdcs.pram[13] << 8) | ((m->gdcs.pram[14] & 3) << 16));
+    uint32_t len3 = (uint32_t)((m->gdcs.pram[10] >> 4) | ((m->gdcs.pram[11] & 0x3F) << 4));
+    uint32_t len4 = (uint32_t)((m->gdcs.pram[14] >> 4) | ((m->gdcs.pram[15] & 0x3F) << 4));
     int zoom = ((m->gdcs.zoom >> 4) & 15) + 1;   // ZOOM の上位 4bit が表示の倍率（下位は描画用）
     // 1 本の VRAM の行を何本の走査線で見せるか: GDC の CSRFORM の「1 行の走査線数」（200 ライン表示は 2）、
     // と ZOOM のうち大きいもの（BIOS・LIO の 200 ライン表示も CSRFORM で作る）
@@ -52,11 +57,19 @@ int video_render(Machine* m, uint32_t* out) {
                                   : (uint32_t)(m->gdcs.pitch >= 40 ? m->gdcs.pitch : 40) * 2;
     // LEN は走査線の本数（400 ライン基準）
     if (len1 == 0 || len1 > 400) len1 = 400;
+    // GDC の表示領域は実機では最大 4 つ。各ラインが属する領域の SAD から読む
+    // （3 領域使うゲームがある: ファーランドストーリーの戦闘カットインは
+    // 上 32 行固定／中 240 行 横スクロール／下 128 行固定。従来の 2 領域前提だと
+    // 下部が中領域の続きとして読まれ、スクロールに引きずられた）。
+    // LEN=0 の領域は「画面下端まで」（従来セマンティクス）。
+    const uint32_t areaSad[4] = { sad1, sad2, sad3, sad4 };
+    const uint32_t areaLen[4] = { len1, len2, len3, len4 };
+    int areaTop[4]; { int acc = 0; for (int a = 0; a < 4; a++) { areaTop[a] = acc; uint32_t L = areaLen[a]; if (L == 0 || acc + (int)L > 400) L = (uint32_t)(400 - acc); acc += (int)L; } }
     for (int y = 0; y < 400; y++) {
         uint32_t* o = out + y * 640;
         if (!gon) { for (int x = 0; x < 640; x++) o[x] = 0xFF000000u; continue; }
-        uint32_t addr = (uint32_t)y < len1 ? (sad1 * 2 + (uint32_t)(y / rep) * stride)
-                                            : (sad2 * 2 + (uint32_t)((y - (int)len1) / rep) * stride);
+        int a = 0; while (a < 3 && y >= areaTop[a + 1]) a++;
+        uint32_t addr = areaSad[a] * 2 + (uint32_t)((y - areaTop[a]) / rep) * stride;
         for (int bx = 0; bx < 80; bx++) {
             uint32_t a = (addr + bx) & 0x7FFF;
             uint8_t b = pl[0][a], r = pl[1][a], g = pl[2][a], e = m->analog ? pl[3][a] : 0;
