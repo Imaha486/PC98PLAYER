@@ -110,7 +110,7 @@ const SCHEMA = [
   { title: "起動するもの", note: "いちばん大事な項目です", items: [
     { key: "Start", label: "最初に実行するプログラム", type: "file", def: "", always: true, accept: ".exe,.com,.bat",
       folder: true, exts: ["EXE", "COM", "BAT"],
-      help: "ゲームのフォルダの中の EXE・COM・BAT。サブフォルダのものは GAME\\GAME.EXE のように書きます（そのフォルダをカレントにして実行）。「フォルダを選ぶ」でゲームのフォルダを選ぶと、中のプログラムから選べます。" },
+      help: "ゲームのフォルダの中の EXE・COM・BAT。空にすると、PC98PLAYER を起動するたびに選ぶ画面が出ます（いくつかのプログラムを使い分けるとき）。サブフォルダのものは GAME\\GAME.EXE のように書きます（そのフォルダをカレントにして実行）。「フォルダを選ぶ」でゲームのフォルダを選ぶと、中のプログラムから選べます。" },
     { key: "Args", label: "引数", type: "text", def: "", placeholder: "例: /I5 CANYON.MID", help: "Start= のプログラムに渡す引数。" },
     { key: "Title", label: "ウインドウのタイトル", type: "text", def: "", placeholder: "空ならフォルダ名", help: "ウインドウの上に出る名前。" },
     { key: "ExitOnEnd", label: "終わったら窓を閉じる", type: "check", def: "1", on: "1", off: "0", text: "ゲームが終わったら窓を閉じる",
@@ -399,7 +399,7 @@ function generate() {
   }
   if (extraLines.length) { if (com) lines.push("", "; ---- 読み込んだ INI のそのほかの項目"); lines.push(...extraLines); }
   $("#out").value = lines.join("\r\n") + "\r\n";
-  $("#status").textContent = state.Start ? "" : "「最初に実行するプログラム」が空です。";
+  $("#status").textContent = state.Start ? "" : "「最初に実行するプログラム」が空です（起動のたびに選ぶ画面が出ます）。";
 }
 
 // ---- 読み込み ------------------------------------------------------------------------

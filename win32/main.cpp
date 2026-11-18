@@ -1180,7 +1180,7 @@ static void write_template_ini(const std::wstring& path, const std::string& star
     std::string t =
         "; PC98PLAYER.INI  -- このフォルダのゲームを PC98PLAYER.EXE で起動するための設定\r\n"
         "[PC98PLAYER]\r\n"
-        "; 最初に実行するプログラムまたはバッチファイル（引数は Args=）\r\n"
+        "; 最初に実行するプログラムまたはバッチファイル（引数は Args=）。空にすると、起動のたびに選ぶ画面が出る\r\n"
         "Start=" + start + "\r\n"
         "Args=\r\n"
         "; ウインドウの表示倍率（1 で 640x400）\r\n"
@@ -1403,7 +1403,8 @@ static int extract_hd_image(const std::wstring& image, std::wstring dest, std::w
         std::string st = choose_start(dest, guess, std::wstring(sum) + L" ― 最初に実行するファイルを選んでください");
         if (st.empty()) {
             write_template_ini(ini, "");
-            MessageBoxW(nullptr, (L"PC98PLAYER.INI を作りました。INI の Start= に最初に実行するファイルを書いてから起動してください。\n\n" + ini).c_str(),
+            MessageBoxW(nullptr, (L"PC98PLAYER.INI のひな形を作りました。Start= が空なので、起動のたびに最初に実行するファイルを選ぶ画面が出ます。\n"
+                                  L"いつも同じファイルで始めるなら、INI の Start= に書いてください。\n\n" + ini).c_str(),
                         L"PC98PLAYER", MB_ICONINFORMATION);
             return 0;
         }
@@ -1447,7 +1448,7 @@ static std::wstring full_path_of(const std::wstring& p) {
     return r;
 }
 static void apply_boot_override(PlayerSettings* ps);
-// Root= を当ててゲームのフォルダを決め、PlayerSettings を作る（Start= が空なら推測）
+// Root= を当ててゲームのフォルダを決め、PlayerSettings を作る（Start= が空なら空のまま。起動のたびに選んでもらう）
 static void resolve_settings(const std::wstring& ini_path, const std::wstring& base_dir, const Ini& ini, PlayerSettings* ps, std::wstring* game_dir) {
     std::wstring dir = base_dir;
     std::string rt = ini.get("PC98PLAYER.ROOT", "");   // Root=: ゲームのフォルダを INI とは別の場所にする（INI からの相対パス可）
@@ -1462,11 +1463,6 @@ static void resolve_settings(const std::wstring& ini_path, const std::wstring& b
     }
     player_settings_from_ini(ini, U(dir), ps);
     apply_boot_override(ps);
-    if (ps->cfg.start.empty() && !ps->cfg.boot_fd) {
-        // Start= が空: ゲームのフォルダから起動するファイルを推測して、それで起動する
-        std::string st = guess_start(dir);
-        if (!st.empty()) ps->cfg.start = st;
-    }
     *game_dir = dir;
 }
 static void set_trace_log(const PlayerSettings& ps) {
@@ -1558,6 +1554,8 @@ static void apply_boot_override(PlayerSettings* ps) {
     ps->cfg.floppy_image2 = U(g_boot_override.disk2);
 }
 
+// INI の Start= が空のとき、起動したときに選んでもらったファイル（INI には書かない。読み直し（F11 → R）でも使う）
+static std::string g_session_start;
 static bool g_reload_memedit = false, g_reload_codeedit = false;
 static bool reload_settings(PlayerSettings* out, std::wstring* err) {
     if (g_ini_path.empty()) return false;
@@ -1566,6 +1564,7 @@ static bool reload_settings(PlayerSettings* out, std::wstring* err) {
     PlayerSettings ps;
     std::wstring dir;
     resolve_settings(g_ini_path, g_base_dir, ini, &ps, &dir);
+    if (ps.cfg.start.empty() && !ps.cfg.boot_fd) ps.cfg.start = g_session_start;   // Start= が空: 起動したときに選んだファイルのまま
     if (ps.cfg.start.empty() && !ps.cfg.boot_fd) { *err = L"INI の Start= が空なので、今の設定のまま起動し直しました"; return false; }
     // フロッピー: INI の FloppyDisk= / FloppyImage= が変わっていなければ、今入っているディスクのまま
     if (ps.cfg.floppy_image == g_ini_floppy) ps.cfg.floppy_image = floppy::current_path();
@@ -1767,13 +1766,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
         if (!st.empty()) write_template_ini(ini_path, st);
     }
     if (GetFileAttributesW(ini_path.c_str()) == INVALID_FILE_ATTRIBUTES && !g_boot_override.on) {
-        std::string st = guess_start(dir);
-        write_template_ini(ini_path, st);
-        std::wstring msg = L"PC98PLAYER.INI が無かったので、ひな形を作りました。\n\n";
-        msg += st.empty() ? L"起動するファイルが見つかりません。INI の Start= に書いてから、もう一度起動してください。"
-                          : (L"Start=" + W(st) + L" で起動します。違う場合は INI を書き換えてください。");
-        MessageBoxW(nullptr, msg.c_str(), L"PC98PLAYER", MB_ICONINFORMATION);
-        if (st.empty()) return 1;
+        // 選ぶのをやめた: Start= を空にしたひな形を作って終わる（次からは起動のたびに選ぶ画面が出る）
+        write_template_ini(ini_path, "");
+        MessageBoxW(nullptr, (L"PC98PLAYER.INI のひな形を作りました。\n\n"
+                              L"Start= が空なので、次からは起動のたびに最初に実行するファイルを選ぶ画面が出ます。\n"
+                              L"いつも同じファイルで始めるなら、INI の Start= に書いてください。\n\n" + ini_path).c_str(),
+                    L"PC98PLAYER", MB_ICONINFORMATION);
+        return 0;
     }
     load_ini_any(ini_path, ini);
     g_ini_path = ini_path; g_base_dir = dir;
@@ -1781,10 +1780,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
     g_ini_floppy = ps.cfg.floppy_image;
     g_ini_floppy2 = ps.cfg.floppy_image2;
     if (ps.cfg.start.empty() && !ps.cfg.boot_fd) {
-        std::wstring msg = L"PC98PLAYER.INI の Start= が空です。最初に実行するファイル名を書いてください。\n\n読んだ INI: " + ini_path +
-                           L"\nゲームのフォルダ: " + dir;
-        MessageBoxW(nullptr, msg.c_str(), L"PC98PLAYER", MB_ICONERROR);
-        return 1;
+        // Start= が空: 起動のたびに、最初に実行するファイルを選んでもらう（INI は書き換えない）。やめたら終わる
+        std::string st = choose_start(dir, guess_start(dir), L"最初に実行するファイルを選んでください（INI の Start= が空なので、起動のたびに選びます）");
+        if (st.empty()) return 0;
+        ps.cfg.start = st;
+        g_session_start = st;
     }
     set_trace_log(ps);
     }

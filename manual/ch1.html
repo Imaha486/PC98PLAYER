@@ -90,6 +90,7 @@ Super Depth では <code>DEPTH.EXE</code> が最初から選ばれているの�
 </figure>
 <p>選んだファイル名を <code>Start=</code> に書いた <code>PC98PLAYER.INI</code> がフォルダに作られ、そのままゲームが始まります。
 次からは <code>PC98PLAYER.EXE</code> をダブルクリックするだけで、この選択の画面は出ずに始まります。</p>
+<p>選ぶ画面で「キャンセル」を押すと、<code>Start=</code> を空にした <code>PC98PLAYER.INI</code> のひな形が作られます。<code>Start=</code> が空の INI では、起動のたびに同じ選ぶ画面が出ます（選んだファイルは INI に書きません）。いつも同じファイルで始めるなら、<code>Start=</code> に書いてください。</p>
 <pre>[PC98PLAYER]
 Start=DEPTH.EXE</pre>
 
@@ -286,14 +287,14 @@ Start=A:\AUTOEXEC.BAT</pre>
   <li>ほとんどの項目（<code>Start=</code>・<code>CpuMHz=</code>・音・メモリ・<code>Drive=</code>・ゲームパッド・<code>Title=</code>・<code>Scale=</code>・<code>FullScreen=</code>・<code>SampleRate=</code>・<code>MIDI=</code> など）がそのまま反映されます。</li>
   <li><code>FloppyDisk=</code>／<code>FloppyImage=</code> は、書き換えたときだけ入れ替えます。変えていなければ、F11 の画面で入れ替えたフロッピーがそのまま入っています。</li>
   <li><code>Trace=</code> は、一度記録を始めると、終了するまで記録したままです。</li>
-  <li>INI が読めない・<code>Start=</code> が空、などのときは、今の設定のまま起動し直します（そのことを画面に知らせます）。</li>
+  <li>INI が読めないときは、今の設定のまま起動し直します（そのことを画面に知らせます）。<code>Start=</code> が空のときは、起動したときに選んだファイルで起動し直します。</li>
 </ul>
 
 <h3>基本</h3>
 <div class="tablewrap">
 <table>
   <tr><th>項目</th><th>既定値</th><th>説明</th></tr>
-  <tr><td><code>Start=</code></td><td>（必須）</td><td>最初に実行するプログラムまたはバッチファイル。<code>GAME\GAME.EXE</code> のようにサブフォルダのファイルならそのフォルダを、<code>B:\INSTALL.BAT</code> のようにドライブ付きならそのドライブをカレントにして実行します。</td></tr>
+  <tr><td><code>Start=</code></td><td>なし</td><td>最初に実行するプログラムまたはバッチファイル。<strong>空にすると、起動のたびに選ぶ画面が出ます</strong>（選んだファイルは INI に書きません。いくつかのプログラムを使い分けるフォルダ向け）。<code>GAME\GAME.EXE</code> のようにサブフォルダのファイルならそのフォルダを、<code>B:\INSTALL.BAT</code> のようにドライブ付きならそのドライブをカレントにして実行します。</td></tr>
   <tr><td><code>Args=</code></td><td>なし</td><td><code>Start=</code> に渡す引数。</td></tr>
   <tr><td><code>Title=</code></td><td>フォルダ名</td><td>ウインドウのタイトル。</td></tr>
   <tr><td><code>Root=</code></td><td>INI のフォルダ</td><td>ゲームのフォルダ（INI からの相対パス可）。</td></tr>

@@ -204,7 +204,9 @@ double estimate_cell(const std::vector<float>& flux, size_t a, size_t b) {
 }
 
 // フラックス → セル列（PLL）。flux の添字 → セルの添字 も返す
-void flux_to_cells(const std::vector<float>& flux, double cell0, std::vector<uint8_t>& cells, std::vector<size_t>& pos_of_flux) {
+// kp: 位相のずれを持ち越す割合、ki: セルの長さを合わせる速さ、span: セルの長さが動ける幅（cell0 に対する割合）
+void flux_to_cells(const std::vector<float>& flux, double cell0, std::vector<uint8_t>& cells, std::vector<size_t>& pos_of_flux,
+                   double kp = 0.3, double ki = 0.03, double span = 0.1) {
     cells.clear(); cells.reserve((size_t)(flux.size() * 3));
     pos_of_flux.resize(flux.size() + 1);
     s_cell_us.clear(); s_cell_us.reserve((size_t)(flux.size() * 3));
@@ -219,10 +221,10 @@ void flux_to_cells(const std::vector<float>& flux, double cell0, std::vector<uin
         if (n > 64) { n = (int)(t / cell); carry = 0; for (int k = 0; k < n; k++) { s_cell_us.push_back((t0 + flux[i] * (k + 1) / n) / 1000.0); cells.push_back(k == n - 1 ? 1 : 0); } continue; }
         for (int k = 0; k < n; k++) { s_cell_us.push_back((t0 + flux[i] * (k + 1) / n) / 1000.0); cells.push_back(k == n - 1 ? 1 : 0); }
         double err = t - n * cell;
-        carry = err * 0.3;                                   // 位相のずれを少し持ち越す
+        carry = err * kp;                                    // 位相のずれを少し持ち越す
         if (n <= 4) {
-            cell += err / n * 0.03;                          // 回転むらに少しずつ合わせる
-            cell = std::max(cell0 * 0.9, std::min(cell0 * 1.1, cell));
+            cell += err / n * ki;                            // 回転むらに少しずつ合わせる
+            cell = std::max(cell0 * (1.0 - span), std::min(cell0 * (1.0 + span), cell));
         }
     }
     pos_of_flux[flux.size()] = cells.size();
@@ -303,6 +305,74 @@ int guess_media(double cell_ns, const FdTrack& t) {
 
 } // namespace
 
+
+// 回転の区切り（反転の添字）。無ければ全体を 1 回転とみなす
+static std::vector<size_t> ix_flux_of(const std::vector<size_t>& index, size_t n) {
+    std::vector<size_t> v;
+    for (size_t i : index) if (i <= n) v.push_back(i);
+    if (v.size() < 2) { v.clear(); v.push_back(0); v.push_back(n); }
+    return v;
+}
+// 読めなかった（CRC エラー・ID だけ・見つからない）セクタがあるトラックは、PLL の設定とセルの長さを変えて
+// 読み直し、CRC が合ったものだけを採る。弱った（磁気が弱い・回転がふらつく）ディスクの読み取りを助ける。
+// わざと CRC エラーにしてあるセクタは、どう読んでも合わないので、そのまま残る
+static void retry_bad(const std::vector<float>& flux, const std::vector<size_t>& ixf, double cell, int cyl, int head, FdTrack& out) {
+    bool bad = out.secs.empty();
+    for (const auto& s : out.secs) if (s.status != 0) bad = true;
+    if (!bad) return;
+    struct P { double scale, kp, ki, span; };
+    static const P ps[] = {
+        {1.00, 0.15, 0.01, 0.10}, {1.00, 0.50, 0.08, 0.15}, {1.00, 0.30, 0.10, 0.25},
+        {0.95, 0.30, 0.03, 0.10}, {1.05, 0.30, 0.03, 0.10}, {1.33, 0.30, 0.03, 0.15},
+    };
+    std::vector<RawSec> good;
+    std::vector<double> keep_us = s_cell_us;   // 時間の情報は最初の読み方のものを残す
+    for (const P& p : ps) {
+        std::vector<uint8_t> cells; std::vector<size_t> pos;
+        flux_to_cells(flux, cell * p.scale, cells, pos, p.kp, p.ki, p.span);
+        for (size_t k = 0; k + 1 < ixf.size(); k++) {
+            size_t from = pos[ixf[k]], to = pos[ixf[k + 1]];
+            if (to <= from + 1000) continue;
+            double len = (double)(to - from);
+            size_t end = std::min(cells.size(), to + (size_t)(len * 0.12));
+            std::vector<RawSec> rv;
+            scan_mfm(cells, from, to, end, len, rv);
+            for (auto& r : rv) if (r.id_ok && r.has_data && r.data_ok) good.push_back(std::move(r));
+        }
+    }
+    s_cell_us.swap(keep_us);
+    if (good.empty()) return;
+    auto near = [](double a, double b) { double d = fabs(a - b); return std::min(d, 1.0 - d) < 0.03; };
+    for (auto& s : out.secs) {
+        if (s.status == 0) continue;
+        for (const auto& g : good)
+            if (g.c == s.c && g.h == s.h && g.r == s.r && g.n == s.n && !g.fm) {
+                s.status = 0; s.deleted = g.deleted; s.data = g.data; s.copies = 1;
+                if (s.data_us <= 0) s.data_us = g.data_us;
+                break;
+            }
+    }
+    // 元の読み方では ID も見つからなかったセクタ: 同じ ID が無ければ足す（回転の中の位置の順に並べる）
+    std::vector<std::pair<double, FdSector>> add;
+    for (const auto& g : good) {
+        bool have = false;
+        for (const auto& s : out.secs) if (s.c == g.c && s.h == g.h && s.r == g.r && s.n == g.n) { have = true; break; }
+        for (const auto& a : add) if (a.second.c == g.c && a.second.h == g.h && a.second.r == g.r && near(a.first, g.angle)) { have = true; break; }
+        if (have) continue;
+        FdSector o; o.c = g.c; o.h = g.h; o.r = g.r; o.n = g.n; o.fm = false; o.deleted = g.deleted;
+        o.file_off = -1; o.copies = 1; o.next_copy = 0; o.status = 0; o.data = g.data; o.data_us = g.data_us;
+        add.push_back({g.angle, o});
+    }
+    if (add.empty()) return;
+    // 元のセクタには位置が残っていないので、R の順で間に入れる（ふつうのディスクは R の順に並んでいる）
+    for (auto& a : add) {
+        size_t at = out.secs.size();
+        for (size_t i = 0; i < out.secs.size(); i++) if (out.secs[i].r > a.second.r) { at = i; break; }
+        out.secs.insert(out.secs.begin() + (long)at, a.second);
+    }
+    (void)cyl; (void)head;
+}
+
 namespace fdflux {
 
 bool decode_flux(const std::vector<float>& flux, const std::vector<size_t>& index, int cyl, int head, FdTrack& out, int* media_out) {
@@ -330,6 +400,7 @@ bool decode_flux(const std::vector<float>& flux, const std::vector<size_t>& inde
         revs.push_back(std::move(rv));
     }
     merge_revs(revs, cyl, head, out);
+    retry_bad(flux, ix_flux_of(index, flux.size()), cell, cyl, head, out);
     if (media_out) *media_out = guess_media(cell, out);
     return !out.secs.empty();
 }
