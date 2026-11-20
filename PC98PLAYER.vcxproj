@@ -42,7 +42,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>winmm.lib;gdi32.lib;user32.lib;shell32.lib;comdlg32.lib;setupapi.lib;advapi32.lib;ole32.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winmm.lib;gdi32.lib;user32.lib;shell32.lib;comdlg32.lib;setupapi.lib;advapi32.lib;ole32.lib;uuid.lib;imm32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(YmfmPresent)'=='true'">

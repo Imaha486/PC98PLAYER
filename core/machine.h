@@ -460,6 +460,7 @@ void console_putc(Machine* m, uint8_t c);
 void console_reset(Machine* m);
 int  bios_key_available(Machine* m);
 uint16_t bios_key_read(Machine* m, bool remove);
+bool bios_key_put_char(Machine* m, uint8_t ch);   // キーバッファに文字だけを積む（日本語入力の確定文字）
 
 // pcm86.cpp
 void    pcm86_advance(Machine* m, uint32_t t);

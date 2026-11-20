@@ -166,6 +166,12 @@ int main(int argc, char** argv) {
             if (f == 0) { saved_lo = g_trace_port_lo; saved_hi = g_trace_port_hi; g_trace_port_lo = 1; g_trace_port_hi = 0; }
             if (f == from) { g_trace_port_lo = saved_lo; g_trace_port_hi = saved_hi; } } }
         bool shot = shots.count(f) > 0 || f == frames - 1; bool rend = shot || getenv("RENDERALL");
+        if (getenv("IMESJ")) {   // IMESJ=開始フレーム:16進のシフトJIS列（日本語入力で確定した文字の代わり）
+            static std::vector<uint8_t> q; static bool init = false;
+            if (!init) { init = true; unsigned f0; char hx[2048]; if (sscanf(getenv("IMESJ"), "%u:%2047s", &f0, hx) == 2) { (void)f0; for (size_t i = 0; hx[i] && hx[i + 1]; i += 2) { unsigned v; sscanf(hx + i, "%2x", &v); q.push_back((uint8_t)v); } } }
+            unsigned f0 = (unsigned)atoi(getenv("IMESJ"));
+            if ((unsigned)f >= f0) while (!q.empty() && bios_key_put_char(p->m, q.front())) q.erase(q.begin());
+        }
         p->run_frame(rend, !getenv("NOAUDIO"));
         if (getenv("FRAMEHASH") && rend) {   // 画面が変わったフレームを数える（動きのなめらかさを見る）
             uint64_t h = 1469598103934665603ull; for (int i = 0; i < 640 * p->fb_h; i++) { h ^= p->fb[i]; h *= 1099511628211ull; }

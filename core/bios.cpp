@@ -85,6 +85,14 @@ static void kb_push(Machine* m, uint16_t code) {
     r[0x528] = (uint8_t)(cnt + 1);
 }
 int bios_key_available(Machine* m) { return m->ram[0x528]; }
+// Windows の日本語入力で確定した文字（シフト JIS の 1 バイトずつ）を、キーバッファに文字コードだけで積む
+//（キーコードは 0。実機の FEP も、漢字は 2 バイトの文字として順に渡す）。積めたら true
+bool bios_key_put_char(Machine* m, uint8_t ch) {
+    if (m->ram[0x528] >= 16) return false;
+    kb_push(m, ch);
+    if (m->cpu.halted) m->cpu.halted = 0;   // キーを待って止まっている CPU を起こす（キーの割込みは来ないので）
+    return true;
+}
 uint16_t bios_key_read(Machine* m, bool remove) {
     uint8_t* r = m->ram;
     if (!r[0x528]) return 0;

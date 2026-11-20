@@ -1642,8 +1642,8 @@ static void int21(Machine* m) {
         uint32_t a = lin(DS(m), DX(m));
         uint8_t max = mem_rb(m, a);
         static std::string line;
-        static bool active = false;
-        if (!active) { line.clear(); active = true; }
+        static bool active = false, skip_trail = false, want_trail = false;
+        if (!active) { line.clear(); active = true; skip_trail = false; want_trail = false; }
         while (con_have_char(m)) {
             uint8_t ch = con_get_char(m);
             if (ch == 0x0D) {
@@ -1654,7 +1654,22 @@ static void int21(Machine* m) {
                 active = false;
                 return;
             }
-            if (ch == 0x08) { if (!line.empty()) { line.pop_back(); console_putc(m, 8); console_putc(m, ' '); console_putc(m, 8); } continue; }
+            auto lead = [](uint8_t b) { return (b >= 0x81 && b <= 0x9F) || (b >= 0xE0 && b <= 0xFC); };
+            if (ch == 0x08) {   // 1 文字消す（漢字なら 2 バイト・2 桁）
+                if (line.empty()) continue;
+                size_t i = 0, last = 0;
+                while (i < line.size()) { last = i; i += (lead((uint8_t)line[i]) && i + 1 < line.size()) ? 2 : 1; }
+                int n = (int)(line.size() - last);
+                line.resize(last);
+                for (int k = 0; k < n; k++) { console_putc(m, 8); console_putc(m, ' '); console_putc(m, 8); }
+                continue;
+            }
+            if (skip_trail) { skip_trail = false; continue; }   // 入りきらなかった漢字の 2 バイト目
+            if (want_trail) { want_trail = false; line.push_back((char)ch); console_putc(m, ch); continue; }   // 漢字の 2 バイト目（場所は取ってある）
+            if (lead(ch)) {   // 漢字は 2 バイトそろって入るときだけ
+                if (line.size() + 2 >= max) { skip_trail = true; continue; }
+                want_trail = true; line.push_back((char)ch); console_putc(m, ch); continue;
+            }
             if (line.size() + 1 < max) { line.push_back((char)ch); console_putc(m, ch); }
         }
         wait_retry(m); return; }

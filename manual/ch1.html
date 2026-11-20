@@ -40,6 +40,7 @@
     <li><a href="#gamepad">ゲームパッド</a></li>
     <li><a href="#rhythm">リズム音源の本物（RhythmROM）</a></li>
     <li><a href="#cdrom">CD-ROM 版のゲーム（CD-DA を含む）</a></li>
+    <li><a href="#ime">日本語入力（Windows の IME）</a></li>
   </ol>
 </nav>
 
@@ -156,6 +157,7 @@ Start=DEPTH.EXE</pre>
   <tr><td><kbd>Shift</kbd>+<kbd>F11</kbd></td><td>ステートセーブ（保存先を選ぶ画面）</td></tr>
   <tr><td><kbd>F11</kbd></td><td>ステートロード（読み込むスロットを選ぶ画面）</td></tr>
   <tr><td><kbd>Shift</kbd>+<kbd>F12</kbd>（押している間）</td><td>早送り</td></tr>
+  <tr><td><kbd>半角/全角</kbd> または <kbd>Ctrl</kbd>+<kbd>変換</kbd></td><td>日本語入力（Windows の IME）の入り切り（<a href="#ime">1-14</a>）</td></tr>
   <tr><td><kbd>Alt</kbd>+<kbd>Enter</kbd></td><td>全画面表示の切り替え</td></tr>
   <tr><td><kbd>Alt</kbd>+<kbd>F4</kbd></td><td>終了</td></tr>
   <tr><td>ゲームパッド</td><td>音源ボードのジョイスティック端子につないだ ATARI 仕様のジョイスティック（ボタンにキーも割り当て可。<a href="#gamepad">1-11</a>）</td></tr>
@@ -366,6 +368,7 @@ Start=A:\AUTOEXEC.BAT</pre>
     2: 捕まえずに（Windows のカーソルは自由に窓の外へ出せる）、カーソルがゲームの画面の上にある間だけ、その動きとボタンをゲームへ送ります。
     メモリエディタなど、ほかの窓と行き来しながら遊ぶときに便利です。Windows のカーソルは画面の上でも表示したままです（勢いよく動かすと外へ出ます）。</td></tr>
   <tr><td><code>MiddleRelease=</code></td><td>1</td><td>中ボタン（ホイール）クリックでマウスを放す。0 で無効。</td></tr>
+  <tr><td><code>IME=</code></td><td>1</td><td>Windows の日本語入力（IME）で漢字を入力できるようにする。<kbd>半角/全角</kbd> か <kbd>Ctrl</kbd>+<kbd>変換</kbd> で入り切り（起動したときは切ってあります）。0 で使わない（<a href="#ime">1-14</a>）。</td></tr>
 </table>
 </div>
 
@@ -703,6 +706,20 @@ CDDA=BGM</pre>
   <li><code>DIR Q:</code> や <code>VOL Q:</code> では、CD のボリューム名が出ます。空き容量は 0 です。</li>
   <li>CD の入れ替え（2 枚組のゲーム）には、まだ対応していません。</li>
   <li><code>Trace=1</code> にすると、<code>PC98PLAYER.LOG</code> に <code>[cd] CD-ROM Q: …</code>（何を入れたか）と、ゲームが MSCDEX に問い合わせた内容が残ります。</li>
+</ul>
+
+<h2 id="ime">1-14. 日本語入力（Windows の IME）</h2>
+<p>Windows の日本語入力（IME）で、ひらがな・カタカナ・漢字を PC-98 のソフトに入力できます。PC-98 の中に日本語入力のプログラム（FEP）を入れないので、PC-98 のメモリは少しも使いません。</p>
+<ol>
+  <li><kbd>半角/全角</kbd>（または PC-98 と同じ <kbd>Ctrl</kbd>+<kbd>変換</kbd>）を押すと、日本語入力が入ります。タイトルバーに <code>[日本語入力]</code> と出ます。起動したときは切ってあります。</li>
+  <li>ローマ字やかなで打って変換します。変換中の文字と候補は、PC-98 の画面のカーソルの位置に重ねて出ます（Windows の IME の窓）。</li>
+  <li><kbd>Enter</kbd> で確定すると、その文字（シフト JIS）が PC-98 のソフトに渡ります。</li>
+  <li>もう一度 <kbd>半角/全角</kbd> を押すと切れて、キーはこれまでどおり PC-98 のキーボードとして働きます。</li>
+</ol>
+<ul>
+  <li>確定した文字は、BIOS のキーバッファ（<code>0502h</code>〜）に、キーコード 0・文字コードだけの形で 1 バイトずつ入ります（漢字は 2 バイト続けて）。MS-DOS から文字を読むソフト（コマンドの入力、エディタなど）は、そのまま受け取れます。行の入力（INT 21h AH=0Ah）の <kbd>BS</kbd> は、漢字を 1 文字（2 バイト）ずつ消します。</li>
+  <li>キーボードの割込みを自分で受けてキーを読むソフト（ゲームなど）では、日本語は入りません。そのようなソフトでも、BIOS のキーバッファを読めば受け取れます。</li>
+  <li>日本語入力が入っている間は、文字のキーは PC-98 のキーボードに送られません。ゲームで遊ぶときは切っておいてください。ゲームで誤って入ってしまうときは、INI に <code>IME=0</code> と書くと使わなくなります。</li>
 </ul>
 
 <div class="pager">

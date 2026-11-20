@@ -18,6 +18,10 @@
 #include <shellapi.h>
 #include <commdlg.h>
 #include <shobjidl.h>
+#include <imm.h>
+#ifdef _MSC_VER
+#pragma comment(lib, "imm32.lib")
+#endif
 // ボタン・チェックボックスなどを今の Windows の見た目（コモンコントロール 6）で描く。
 // mingw ではマニフェスト（pc98player.manifest）に書いてある。MSVC はリンカに渡す
 #ifdef _MSC_VER
@@ -375,6 +379,7 @@ static void set_capture(bool on) {
 }
 
 static int g_title_mhz = 0;   // タイトルに出している CPU の速さ（MHz。0 = まだ）
+static bool ime_is_open();
 static void update_title() {
     std::wstring t = g_title;
     if (g_p && g_p->m) {   // CPU の速さ（自動調整で下げているときは「いま / 設定」）
@@ -392,6 +397,7 @@ static void update_title() {
     else if (g_captured) t += L"  [マウス使用中: F12 で解放]";
     else t += L"  [クリックでマウスを使う]";
     if (g_turbo) t += L"  [早送り]";
+    if (ime_is_open()) t += L"  [日本語入力]";
     if (g_memedit_paused) t += L"  [一時停止中: エディタ操作中]";
     SetWindowTextW(g_hwnd, t.c_str());
 }
@@ -995,6 +1001,95 @@ static void present(HDC dc) {
     }
 }
 
+// ---- 日本語入力（Windows の IME） --------------------------------------------------
+//  PC-98 の中に FEP を常駐させず、Windows の IME で変換する（エミュレータのメモリは使わない）。
+//  ・半角/全角キー（または CTRL+変換 = PC-98 の CTRL+XFER）で入り切り。起動したときは切ってある
+//  ・変換中の文字と候補は Windows の IME の窓で、PC-98 のテキストカーソルの位置に重ねて出す
+//  ・確定した文字はシフト JIS にして、BIOS のキーバッファ（0502h〜）へ 1 バイトずつ積む
+//    （MS-DOS の行入力やエディタはそのまま受け取れる。自前のキー割り込みのソフトも、ここを読めば受け取れる）
+//  INI の IME=0 で使わない（窓に IME をつながない）
+static bool g_ime_enabled = true;
+static bool g_ime_ready = false;   // 窓に IME の設定を当てた
+static std::deque<uint8_t> g_ime_queue;   // 確定してまだ積んでいない文字（シフト JIS）
+static bool ime_is_open() {
+    if (!g_hwnd || !g_ime_enabled) return false;
+    HIMC c = ImmGetContext(g_hwnd); if (!c) return false;
+    bool o = ImmGetOpenStatus(c) != FALSE;
+    ImmReleaseContext(g_hwnd, c);
+    return o;
+}
+static void ime_set_open(bool on) {
+    if (!g_hwnd || !g_ime_enabled) return;
+    HIMC c = ImmGetContext(g_hwnd); if (!c) return;
+    ImmSetOpenStatus(c, on ? TRUE : FALSE);
+    ImmReleaseContext(g_hwnd, c);
+}
+static void ime_apply_enabled() {
+    if (!g_hwnd) return;
+    if (g_ime_enabled) { ImmAssociateContextEx(g_hwnd, nullptr, IACE_DEFAULT); ime_set_open(false); }
+    else ImmAssociateContextEx(g_hwnd, nullptr, 0);   // IME をつながない
+    g_ime_queue.clear();
+}
+// 変換の窓を、PC-98 のテキストカーソルの位置に、画面の文字と同じ大きさで出す
+static void ime_place(HWND h) {
+    if (!g_p || !g_ime_enabled) return;
+    HIMC c = ImmGetContext(h); if (!c) return;
+    RECT rc; GetClientRect(h, &rc);
+    int dx, dy, dw, dh; view_rect(rc.right, rc.bottom, &dx, &dy, &dw, &dh);
+    Machine* m = g_p->m;
+    int rowh = (m->gdcm.csrform[0] & 0x1F) + 1;
+    if (rowh < 8) rowh = 16;
+    uint32_t ead = m->gdcm.ead & 0x1FFF;
+    int col = (int)(ead % 80), row = (int)(ead / 80);
+    int fbh = (g_p->fb_h == 480) ? 480 : 400;
+    double kx = dw / 640.0, ky = dh / (double)fbh;
+    int px = dx + (int)(col * 8 * kx), py = dy + (int)(row * rowh * ky);
+    if (py > dy + dh - (int)(16 * ky)) py = dy + dh - (int)(16 * ky);
+    LOGFONTW lf = {};
+    lf.lfHeight = -(int)(16 * ky + 0.5); lf.lfCharSet = SHIFTJIS_CHARSET;
+    wcscpy(lf.lfFaceName, L"ＭＳ ゴシック");
+    ImmSetCompositionFontW(c, &lf);
+    COMPOSITIONFORM cf = {}; cf.dwStyle = CFS_POINT; cf.ptCurrentPos.x = px; cf.ptCurrentPos.y = py;
+    ImmSetCompositionWindow(c, &cf);
+    CANDIDATEFORM cand = {}; cand.dwIndex = 0; cand.dwStyle = CFS_CANDIDATEPOS;
+    cand.ptCurrentPos.x = px; cand.ptCurrentPos.y = py + (int)(rowh * ky);
+    ImmSetCandidateWindow(c, &cand);
+    ImmReleaseContext(h, c);
+}
+// 確定した文字を受け取る（シフト JIS にして待ち行列へ）
+static void ime_take_result(HWND h) {
+    HIMC c = ImmGetContext(h); if (!c) return;
+    LONG n = ImmGetCompositionStringW(c, GCS_RESULTSTR, nullptr, 0);
+    if (n > 0) {
+        std::wstring w((size_t)n / sizeof(wchar_t), L'\0');
+        ImmGetCompositionStringW(c, GCS_RESULTSTR, &w[0], (DWORD)n);
+        int len = WideCharToMultiByte(932, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+        if (len > 0) {
+            std::string sj((size_t)len, '\0');
+            WideCharToMultiByte(932, 0, w.c_str(), (int)w.size(), &sj[0], len, nullptr, nullptr);
+            for (unsigned char ch : sj) g_ime_queue.push_back(ch);
+        }
+    }
+    ImmReleaseContext(h, c);
+}
+// フレームごとに、キーバッファの空いているぶんだけ積む（漢字の 2 バイトは分けない）
+static void ime_feed() {
+    if (!g_p || g_ime_queue.empty()) return;
+    Machine* m = g_p->m;
+    while (!g_ime_queue.empty()) {
+        uint8_t b = g_ime_queue.front();
+        bool lead = (b >= 0x81 && b <= 0x9F) || (b >= 0xE0 && b <= 0xFC);
+        if (lead && g_ime_queue.size() >= 2) {
+            if (bios_key_available(m) > 14) break;
+            bios_key_put_char(m, b); g_ime_queue.pop_front();
+            bios_key_put_char(m, g_ime_queue.front()); g_ime_queue.pop_front();
+        } else {
+            if (!bios_key_put_char(m, b)) break;
+            g_ime_queue.pop_front();
+        }
+    }
+}
+
 static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (iu_message(h, msg, wp, lp)) return 0;
     switch (msg) {
@@ -1053,13 +1148,38 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         if (wp == VK_PAUSE) { if (g_p) machine_key(g_p->m, 0x60, down); return 0; }
+        if (g_ime_enabled) {
+            // CTRL+変換（PC-98 の CTRL+XFER）: 日本語入力の入り切り
+            if (down && scan == 0x79 && !ext && (GetKeyState(VK_CONTROL) & 0x8000)) {
+                if (first) { ime_set_open(!ime_is_open()); update_title(); }
+                return 0;
+            }
+            if (wp == VK_PROCESSKEY) return 0;   // 日本語入力が使っているキー（PC-98 には送らない）
+        }
         int sc = map_key(scan, ext);
+        // 日本語入力が使ったキーの「離した」は送らない（押したことを送っていないので）
+        if (sc >= 0 && g_p && !down && !g_p->m->kb_down[sc]) return 0;
         if (sc >= 0 && g_p) {
             bool repeat = down && (lp & (1 << 30));
             if (!repeat || g_p->ps.cfg.key_repeat) machine_key(g_p->m, (uint8_t)sc, down);
         }
         return 0; }
     case WM_SYSCHAR: case WM_CHAR: return 0;
+    case WM_IME_STARTCOMPOSITION:
+        ime_place(h);
+        break;   // 変換の窓は Windows の IME に描いてもらう
+    case WM_IME_COMPOSITION:
+        if (lp & GCS_RESULTSTR) {
+            ime_take_result(h);
+            lp &= ~(LPARAM)(GCS_RESULTSTR | GCS_RESULTREADSTR | GCS_RESULTCLAUSE | GCS_RESULTREADCLAUSE);
+            if (!lp) return 0;   // WM_IME_CHAR を出させない
+        }
+        ime_place(h);
+        break;
+    case WM_IME_CHAR: return 0;
+    case WM_IME_NOTIFY:
+        if (wp == IMN_SETOPENSTATUS) update_title();
+        break;
     case WM_MOUSEMOVE:
         if (g_menu != MENU_NONE) {
             int hit = menu_hit((short)LOWORD(lp), (short)HIWORD(lp));
@@ -1254,6 +1374,8 @@ static void write_template_ini(const std::wstring& path, const std::string& star
         "PauseInactive=0\r\n"
         "; マウスの中ボタン（ホイール）クリックでマウスを放す（0 で無効。F12 は常に有効）\r\n"
         "MiddleRelease=1\r\n"
+        "; Windows の日本語入力（IME）を使う（半角/全角 か CTRL+変換 で入り切り。0 で使わない）\r\n"
+        "IME=1\r\n"
         "; 1 にするとマウスを一切捕まえない（窓に閉じ込めず、ゲームにも渡さない。マウスを使わないソフト向け）\r\n"
         "; 2 にすると捕まえずに、カーソルがゲームの画面の上にある間だけマウスを送る（メモリエディタなど、ほかの窓と行き来するとき向け）\r\n"
         "MouseLockDisable=0\r\n"
@@ -1431,6 +1553,7 @@ static void create_main_window(HINSTANCE inst, int scale) {
     g_bmi.bmiHeader.biSize = sizeof(g_bmi.bmiHeader);
     g_bmi.bmiHeader.biWidth = 640; g_bmi.bmiHeader.biHeight = -400;
     g_bmi.bmiHeader.biPlanes = 1; g_bmi.bmiHeader.biBitCount = 32;
+    ime_apply_enabled(); g_ime_ready = true;   // 日本語入力は切った状態で始める（IME=0 なら IME をつながない）
 }
 
 
@@ -1480,6 +1603,10 @@ static std::wstring apply_host_settings(const Ini& ini) {
     g_mouse_speed = ini.geti("PC98PLAYER.MOUSESPEED", 100);
     g_pause_inactive = ini.geti("PC98PLAYER.PAUSEINACTIVE", 0) != 0;
     g_middle_release = ini.geti("PC98PLAYER.MIDDLERELEASE", 1) != 0;
+    {
+        bool ime = ini.geti("PC98PLAYER.IME", 1) != 0;
+        if (ime != g_ime_enabled || !g_ime_ready) { g_ime_enabled = ime; g_ime_ready = g_hwnd != nullptr; ime_apply_enabled(); }
+    }
     {
         int md = ini.geti("PC98PLAYER.MOUSELOCKDISABLE", 0);
         g_mouse_lock_disable = md == 1;   // 1: マウスを使わない
@@ -1939,6 +2066,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
         LARGE_INTEGER pf0, pf1, pf2, pf3;
         QueryPerformanceCounter(&pf0);
         pad::poll(g_p->m, GetForegroundWindow() == g_hwnd);   // ゲームパッド（窓が前にいるときだけ）
+        ime_feed();   // 日本語入力で確定した文字をキーバッファへ
         QueryPerformanceCounter(&pf1);
         if (g_turbo) {
             // 早送り: 画面 1 枚ぶん（約 1/60 秒）の実時間いっぱいまでフレームを進め、最後の 1 枚だけ描く。
