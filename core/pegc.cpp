@@ -223,9 +223,10 @@ int pegc_render(Machine* m, uint32_t* out) {
     if (pitch == 0) pitch = 80;
     uint32_t page = p.single ? 0 : (uint32_t)(m->disp_bank & 1) * 0x40000;
     uint32_t mask = p.single ? (VRAM_SIZE - 1) : 0x3FFFF;
-    // SCROLL の 2 つの領域（開始アドレスはワード単位。8 バイト単位にするため 2 倍）
+    // SCROLL の表示領域（実機の GDC は最大 4 つ。開始アドレスはワード単位。8 バイト単位にするため 2 倍）
+    // 3 領域使うゲームがある（ファーランドストーリーの戦闘カットイン: 上固定／中スクロール／下固定）。
     int y = 0;
-    for (int area = 0; area < 2 && y < H; area++) {
+    for (int area = 0; area < 4 && y < H; area++) {
         const uint8_t* pr = m->gdcs.pram + area * 4;
         uint32_t sad = (uint32_t)(pr[0] | (pr[1] << 8) | ((pr[2] & 3) << 16));
         uint32_t len = (uint32_t)(((pr[2] | (pr[3] << 8)) & 0x3FFF) >> 4);
